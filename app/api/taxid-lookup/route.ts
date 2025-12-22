@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+export const dynamic = 'force-dynamic';
+
 // IMPORTANT: Replace 'your-email@example.com' with your actual email address
 // This email is required by NCBI for API usage tracking
 const NCBI_EMAIL = 'dnoerz@uke.de'
