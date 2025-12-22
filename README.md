@@ -1,4 +1,4 @@
-# Diversity Surveillance Tool - Frontend
+# Sequence diversity surveillance tool - Frontend
 
 A Next.js web application for primer sequence surveillance with Supabase authentication.
 
