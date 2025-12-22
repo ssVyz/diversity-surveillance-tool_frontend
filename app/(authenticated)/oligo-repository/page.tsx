@@ -34,6 +34,18 @@ export default function OligoRepositoryPage() {
   const [assayId, setAssayId] = useState<number | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
 
+  // Import state
+  const [showImportForm, setShowImportForm] = useState(false)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importAssayId, setImportAssayId] = useState<number | null>(null)
+  const [importLoading, setImportLoading] = useState(false)
+  const [importProgress, setImportProgress] = useState<{
+    total: number
+    success: number
+    failed: number
+    errors: Array<{ name: string; error: string }>
+  } | null>(null)
+
   // Fetch oligos
   const fetchOligos = async () => {
     try {
@@ -91,6 +103,140 @@ export default function OligoRepositoryPage() {
     }
 
     return null
+  }
+
+  // Parse FASTA file
+  const parseFastaFile = (content: string): Array<{ name: string; sequence: string }> => {
+    const sequences: Array<{ name: string; sequence: string }> = []
+    const lines = content.split('\n')
+    let currentName = ''
+    let currentSequence = ''
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+
+      if (trimmed.startsWith('>')) {
+        // Save previous sequence if exists
+        if (currentName && currentSequence) {
+          sequences.push({
+            name: currentName,
+            sequence: currentSequence,
+          })
+        }
+        // Start new sequence - remove '>' and take everything up to first space or newline
+        currentName = trimmed.substring(1).split(/\s+/)[0] || `Sequence_${sequences.length + 1}`
+        currentSequence = ''
+      } else {
+        // Append to current sequence
+        currentSequence += trimmed
+      }
+    }
+
+    // Don't forget the last sequence
+    if (currentName && currentSequence) {
+      sequences.push({
+        name: currentName,
+        sequence: currentSequence,
+      })
+    }
+
+    return sequences
+  }
+
+  // Handle file import
+  const handleFileImport = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!importFile) {
+      setFormError('Please select a FASTA file')
+      return
+    }
+
+    setImportLoading(true)
+    setFormError(null)
+    setImportProgress({ total: 0, success: 0, failed: 0, errors: [] })
+
+    try {
+      // Read file content
+      const fileContent = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = (e) => resolve(e.target?.result as string)
+        reader.onerror = reject
+        reader.readAsText(importFile)
+      })
+
+      // Parse FASTA file
+      const sequences = parseFastaFile(fileContent)
+
+      if (sequences.length === 0) {
+        setFormError('No sequences found in FASTA file')
+        setImportLoading(false)
+        return
+      }
+
+      setImportProgress({ total: sequences.length, success: 0, failed: 0, errors: [] })
+
+      // Import each sequence
+      let successCount = 0
+      let failedCount = 0
+      const errors: Array<{ name: string; error: string }> = []
+
+      for (const seq of sequences) {
+        try {
+          // Clean and validate sequence
+          const cleanedSequence = seq.sequence.replace(/\s/g, '').toUpperCase()
+          const validationError = validateDnaSequence(cleanedSequence)
+
+          if (validationError) {
+            throw new Error(validationError)
+          }
+
+          // Create oligo
+          const { error: createError } = await supabase.rpc('create_user_oligo', {
+            p_sequence_name: seq.name.trim() || `Sequence_${successCount + failedCount + 1}`,
+            p_dna_sequence: cleanedSequence,
+            p_assay_id: importAssayId || null,
+            p_panel_id: null,
+          })
+
+          if (createError) {
+            throw createError
+          }
+
+          successCount++
+        } catch (err: any) {
+          failedCount++
+          errors.push({
+            name: seq.name,
+            error: err.message || 'Unknown error',
+          })
+        }
+
+        // Update progress
+        setImportProgress({
+          total: sequences.length,
+          success: successCount,
+          failed: failedCount,
+          errors,
+        })
+      }
+
+      // Refresh oligos list
+      await fetchOligos()
+
+      // Reset form after a short delay to show final results
+      setTimeout(() => {
+        setImportFile(null)
+        setImportAssayId(null)
+        setShowImportForm(false)
+        setImportProgress(null)
+      }, 3000)
+    } catch (err: any) {
+      setFormError(err.message || 'Failed to import FASTA file')
+      console.error('Error importing FASTA file:', err)
+    } finally {
+      setImportLoading(false)
+    }
   }
 
   // Handle form submission
@@ -202,12 +348,20 @@ export default function OligoRepositoryPage() {
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
           Oligo Repository
         </h1>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors"
-        >
-          {showForm ? 'Cancel' : 'Add New Oligo'}
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setShowImportForm(!showImportForm)}
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg shadow-sm transition-colors"
+          >
+            {showImportForm ? 'Cancel Import' : 'Import from FASTA'}
+          </button>
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors"
+          >
+            {showForm ? 'Cancel' : 'Add New Oligo'}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -305,6 +459,119 @@ export default function OligoRepositoryPage() {
                   setDnaSequence('')
                   setAssayId(null)
                   setFormError(null)
+                }}
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {showImportForm && (
+        <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+            Import Oligos from FASTA File
+          </h2>
+          <form onSubmit={handleFileImport} className="space-y-4">
+            <div>
+              <label
+                htmlFor="fastaFile"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              >
+                FASTA File <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="file"
+                id="fastaFile"
+                accept=".fasta,.fa,.fas,.fna"
+                onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                required
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Select a FASTA file (.fasta, .fa, .fas, or .fna). Each sequence will be imported with its header as the sequence name.
+              </p>
+            </div>
+
+            <div>
+              <label
+                htmlFor="importAssayId"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              >
+                Assay (Optional - applies to all sequences)
+              </label>
+              <select
+                id="importAssayId"
+                value={importAssayId || ''}
+                onChange={(e) => setImportAssayId(e.target.value ? parseInt(e.target.value) : null)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              >
+                <option value="">None</option>
+                {assays.map((assay) => (
+                  <option key={assay.assay_id} value={assay.assay_id}>
+                    {assay.assay_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {importProgress && (
+              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <p className="text-sm text-blue-800 dark:text-blue-200 mb-2">
+                  Progress: {importProgress.success + importProgress.failed} / {importProgress.total}
+                </p>
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mb-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all"
+                    style={{
+                      width: `${((importProgress.success + importProgress.failed) / importProgress.total) * 100}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-xs text-blue-700 dark:text-blue-300">
+                  ✓ Success: {importProgress.success} | ✗ Failed: {importProgress.failed}
+                </p>
+                {importProgress.errors.length > 0 && (
+                  <details className="mt-2">
+                    <summary className="text-xs text-red-600 dark:text-red-400 cursor-pointer">
+                      View errors ({importProgress.errors.length})
+                    </summary>
+                    <ul className="mt-2 text-xs text-red-700 dark:text-red-300 space-y-1">
+                      {importProgress.errors.map((err, idx) => (
+                        <li key={idx}>
+                          <strong>{err.name}:</strong> {err.error}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {formError && (
+              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <p className="text-sm text-red-800 dark:text-red-200">{formError}</p>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                type="submit"
+                disabled={importLoading || !importFile}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg shadow-sm transition-colors"
+              >
+                {importLoading ? 'Importing...' : 'Import Oligos'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowImportForm(false)
+                  setImportFile(null)
+                  setImportAssayId(null)
+                  setFormError(null)
+                  setImportProgress(null)
                 }}
                 className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 rounded-lg transition-colors"
               >
