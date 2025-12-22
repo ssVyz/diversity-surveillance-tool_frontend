@@ -29,7 +29,7 @@ export default function LoginPage() {
       if (error) throw error
 
       if (data.session) {
-        router.push('/')
+        router.push('/dashboard')
         router.refresh()
       }
     } catch (error: any) {

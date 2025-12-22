@@ -48,6 +48,10 @@ export default function Home() {
     // Check for existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
+      // Redirect to dashboard if logged in
+      if (session) {
+        router.push('/dashboard')
+      }
     })
 
     // Listen for auth changes
@@ -55,10 +59,14 @@ export default function Home() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
+      // Redirect to dashboard if logged in
+      if (session) {
+        router.push('/dashboard')
+      }
     })
 
     return () => subscription.unsubscribe()
-  }, [])
+  }, [router])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
