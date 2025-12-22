@@ -25,6 +25,8 @@ export default function TaxIDPage() {
   const [taxid, setTaxid] = useState('')
   const [taxidSpec, setTaxidSpec] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
+  const [fetchLoading, setFetchLoading] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   // Fetch taxids
   const fetchTaxids = async () => {
@@ -36,7 +38,18 @@ export default function TaxIDPage() {
         throw fetchError
       }
 
-      setTaxids(data || [])
+      // Handle the response - ensure data is an array and map to our type
+      if (data && Array.isArray(data)) {
+        const mappedData = data.map((item: any) => ({
+          entry_id: Number(item.entry_id),
+          taxid: Number(item.taxid),
+          created_at: item.created_at,
+          taxid_spec: item.taxid_spec || null,
+        }))
+        setTaxids(mappedData)
+      } else {
+        setTaxids([])
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to fetch taxids')
       console.error('Error fetching taxids:', err)
@@ -62,6 +75,40 @@ export default function TaxIDPage() {
     }
 
     return null
+  }
+
+  // Fetch species name from NCBI
+  const handleFetchSpeciesName = async () => {
+    // Validate taxid first
+    const validationError = validateTaxid(taxid)
+    if (validationError) {
+      setFetchError(validationError)
+      return
+    }
+
+    setFetchLoading(true)
+    setFetchError(null)
+
+    try {
+      const response = await fetch(`/api/taxid-lookup?taxid=${encodeURIComponent(taxid.trim())}`)
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch species name')
+      }
+
+      // Populate the species name field
+      if (data.scientificName) {
+        setTaxidSpec(data.scientificName)
+      } else {
+        setFetchError('Species name not found')
+      }
+    } catch (err: any) {
+      setFetchError(err.message || 'Failed to fetch species name from NCBI')
+      console.error('Error fetching species name:', err)
+    } finally {
+      setFetchLoading(false)
+    }
   }
 
   // Handle form submission
@@ -177,17 +224,36 @@ export default function TaxIDPage() {
               >
                 TaxID (NCBI Taxonomy ID) <span className="text-red-500">*</span>
               </label>
-              <input
-                type="number"
-                id="taxid"
-                value={taxid}
-                onChange={(e) => setTaxid(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter NCBI taxonomy ID (e.g., 9606)"
-                min="1"
-                step="1"
-                required
-              />
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  id="taxid"
+                  value={taxid}
+                  onChange={(e) => {
+                    setTaxid(e.target.value)
+                    setFetchError(null)
+                  }}
+                  className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Enter NCBI taxonomy ID (e.g., 9606)"
+                  min="1"
+                  step="1"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={handleFetchSpeciesName}
+                  disabled={fetchLoading || !taxid.trim()}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 disabled:cursor-not-allowed text-white rounded-lg shadow-sm transition-colors whitespace-nowrap"
+                  title="Fetch species name from NCBI"
+                >
+                  {fetchLoading ? 'Fetching...' : 'Fetch Name'}
+                </button>
+              </div>
+              {fetchError && (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  {fetchError}
+                </p>
+              )}
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 Must be a positive integer representing an NCBI taxonomy ID
               </p>
@@ -234,6 +300,7 @@ export default function TaxIDPage() {
                   setTaxid('')
                   setTaxidSpec('')
                   setFormError(null)
+                  setFetchError(null)
                 }}
                 className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 rounded-lg transition-colors"
               >
