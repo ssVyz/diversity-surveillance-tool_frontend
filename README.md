@@ -37,6 +37,10 @@ npm run dev
 
 4. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 48b069207a7ace8b1fd6bd1572c22fbb77f57b99
 
 ## Project Structure
 
