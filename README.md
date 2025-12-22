@@ -41,10 +41,11 @@ npm run dev
 
 1. Push your code to GitHub
 2. Import your repository in Vercel
-3. Add environment variables in Vercel dashboard:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-4. Deploy!
+3. **IMPORTANT**: Add environment variables in Vercel dashboard (Settings → Environment Variables):
+   - `NEXT_PUBLIC_SUPABASE_URL` = `https://qqjurpkeetxbpqvczdut.supabase.co`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = `sb_publishable_RrfmZjo63p_3hQdEr6KK1w_eRBTrOVI`
+4. Make sure to add these for **Production**, **Preview**, and **Development** environments
+5. Redeploy after adding the environment variables
 
 ## Project Structure
 
