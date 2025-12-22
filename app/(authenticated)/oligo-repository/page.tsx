@@ -195,7 +195,7 @@ export default function OligoRepositoryPage() {
           const { error: createError } = await supabase.rpc('create_user_oligo', {
             p_sequence_name: seq.name.trim() || `Sequence_${successCount + failedCount + 1}`,
             p_dna_sequence: cleanedSequence,
-            p_assay_id: importAssayId || null,
+            p_assay_id: importAssayId !== null && importAssayId !== undefined ? importAssayId : null,
             p_panel_id: null,
           })
 
@@ -264,7 +264,7 @@ export default function OligoRepositoryPage() {
       const { data, error: createError } = await supabase.rpc('create_user_oligo', {
         p_sequence_name: sequenceName.trim(),
         p_dna_sequence: cleanedSequence,
-        p_assay_id: assayId || null,
+        p_assay_id: assayId !== null && assayId !== undefined ? assayId : null,
         p_panel_id: null,
       })
 
@@ -337,7 +337,7 @@ export default function OligoRepositoryPage() {
 
   // Get assay name by ID
   const getAssayName = (assayId: number | null) => {
-    if (!assayId) return 'None'
+    if (assayId === null || assayId === undefined) return 'Not assigned'
     const assay = assays.find((a) => a.assay_id === assayId)
     return assay ? assay.assay_name : 'Unknown'
   }
@@ -428,7 +428,7 @@ export default function OligoRepositoryPage() {
                 onChange={(e) => setAssayId(e.target.value ? parseInt(e.target.value) : null)}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="">None</option>
+                <option value="">Not assigned</option>
                 {assays.map((assay) => (
                   <option key={assay.assay_id} value={assay.assay_id}>
                     {assay.assay_name}
@@ -508,7 +508,7 @@ export default function OligoRepositoryPage() {
                 onChange={(e) => setImportAssayId(e.target.value ? parseInt(e.target.value) : null)}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 focus:border-transparent"
               >
-                <option value="">None</option>
+                <option value="">Not assigned</option>
                 {assays.map((assay) => (
                   <option key={assay.assay_id} value={assay.assay_id}>
                     {assay.assay_name}
