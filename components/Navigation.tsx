@@ -49,13 +49,25 @@ export default function Navigation() {
             ))}
           </div>
 
-          {/* Right side - Logout button */}
-          <button
-            onClick={handleLogout}
-            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors"
-          >
-            Logout
-          </button>
+          {/* Right side - Settings and Logout buttons */}
+          <div className="flex items-center space-x-2">
+            <Link
+              href="/settings"
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                pathname === '/settings'
+                  ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+              }`}
+            >
+              Settings
+            </Link>
+            <button
+              onClick={handleLogout}
+              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </div>
     </nav>

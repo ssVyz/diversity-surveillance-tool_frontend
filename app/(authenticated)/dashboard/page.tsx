@@ -48,16 +48,47 @@ export default function DashboardPage() {
   // Fetch user info
   const fetchUserInfo = async () => {
     try {
+      // Get user email from auth
       const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
+      const userEmail = user?.email || null
+
+      // Fetch name and institution from database
+      const { data, error: fetchError } = await supabase.rpc('fetch_user_name_institution')
+
+      if (fetchError) {
+        console.error('Error fetching user settings:', fetchError)
+        // Still set email even if settings fetch fails
         setUserInfo({
-          email: user.email || null,
-          displayName: null, // Placeholder - not set up yet
-          institution: null, // Placeholder - not set up yet
+          email: userEmail,
+          displayName: null,
+          institution: null,
         })
+        return
       }
+
+      // The function returns an array with one row, or empty array if no entry exists
+      let displayName: string | null = null
+      let institution: string | null = null
+
+      if (data && Array.isArray(data) && data.length > 0) {
+        displayName = data[0].user_name || null
+        institution = data[0].user_institution || null
+      }
+
+      setUserInfo({
+        email: userEmail,
+        displayName,
+        institution,
+      })
     } catch (err: any) {
       console.error('Error fetching user info:', err)
+      // Set email if available even on error
+      const { data: { user } } = await supabase.auth.getUser()
+      setUserInfo({
+        email: user?.email || null,
+        displayName: null,
+        institution: null,
+      })
     }
   }
 
@@ -318,16 +349,16 @@ export default function DashboardPage() {
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Display Name
             </label>
-            <p className="text-gray-600 dark:text-gray-400 italic">
-              {userInfo.displayName || 'Not set'}
+            <p className="text-gray-600 dark:text-gray-400">
+              {userInfo.displayName || <span className="italic">Not set</span>}
             </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Institution
             </label>
-            <p className="text-gray-600 dark:text-gray-400 italic">
-              {userInfo.institution || 'Not set'}
+            <p className="text-gray-600 dark:text-gray-400">
+              {userInfo.institution || <span className="italic">Not set</span>}
             </p>
           </div>
           <div>
