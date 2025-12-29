@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -8,10 +8,12 @@ export const dynamic = 'force-dynamic'
 // Type definitions
 interface DashboardEntry {
   entry_id: number
+  assay_id: number
   assay_name: string
   lookback_days: number | null
   last_checked: string | null
   nuccor_entries_found: number | null
+  nuccor_queue_entry: number | null
 }
 
 interface UserInfo {
@@ -31,12 +33,17 @@ export default function DashboardPage() {
   const [dashboardEntries, setDashboardEntries] = useState<DashboardEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   
   // Checkbox state
   const [selectedEntries, setSelectedEntries] = useState<Set<number>>(new Set())
   const [lookbackDays, setLookbackDays] = useState<string>('30')
   const [runCheckLoading, setRunCheckLoading] = useState(false)
   const [runCheckError, setRunCheckError] = useState<string | null>(null)
+  
+  // Auto-refresh state
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true)
+  const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Fetch user info
   const fetchUserInfo = async () => {
@@ -83,23 +90,56 @@ export default function DashboardPage() {
   }
 
   // Fetch dashboard entries
-  const fetchDashboardEntries = async () => {
+  // First calls fetch_dashboard_entries to sync the dashboard_entries table,
+  // then calls fetch_dashboard_update to get all columns including nuccor_queue_entry
+  const fetchDashboardEntries = useCallback(async (showRefreshing = false) => {
     try {
+      if (showRefreshing) {
+        setRefreshing(true)
+      }
       setError(null)
-      const { data, error: fetchError } = await supabase.rpc('fetch_dashboard_entries')
+      
+      // Step 1: Call fetch_dashboard_entries first to sync the dashboard_entries table
+      // This ensures assays are entered and orphaned entries are deleted
+      const syncResult = await supabase.rpc('fetch_dashboard_entries')
+      
+      if (syncResult.error) {
+        throw syncResult.error
+      }
 
-      if (fetchError) {
-        throw fetchError
+      // Step 2: Fetch dashboard entries with all columns (including nuccor_queue_entry)
+      // and assays in parallel
+      const [entriesResult, assaysResult] = await Promise.all([
+        supabase.rpc('fetch_dashboard_update'),
+        supabase.rpc('fetch_user_assays')
+      ])
+
+      if (entriesResult.error) {
+        throw entriesResult.error
+      }
+
+      if (assaysResult.error) {
+        throw assaysResult.error
+      }
+
+      // Create a map of assay_id to assay_name
+      const assayMap = new Map<number, string>()
+      if (assaysResult.data && Array.isArray(assaysResult.data)) {
+        assaysResult.data.forEach((assay: any) => {
+          assayMap.set(Number(assay.assay_id), assay.assay_name || 'Unknown')
+        })
       }
 
       // Map the response to our DashboardEntry interface
-      if (data && Array.isArray(data)) {
-        const mappedData = data.map((item: any) => ({
+      if (entriesResult.data && Array.isArray(entriesResult.data)) {
+        const mappedData = entriesResult.data.map((item: any) => ({
           entry_id: Number(item.entry_id),
-          assay_name: item.assay_name || '',
+          assay_id: Number(item.assay_id),
+          assay_name: assayMap.get(Number(item.assay_id)) || 'Unknown',
           lookback_days: item.lookback_days ? Number(item.lookback_days) : null,
           last_checked: item.last_checked || null,
           nuccor_entries_found: item.nuccor_entries_found ? Number(item.nuccor_entries_found) : null,
+          nuccor_queue_entry: item.nuccor_queue_entry ? Number(item.nuccor_queue_entry) : null,
         }))
         setDashboardEntries(mappedData)
       } else {
@@ -110,8 +150,11 @@ export default function DashboardPage() {
       console.error('Error fetching dashboard entries:', err)
     } finally {
       setLoading(false)
+      if (showRefreshing) {
+        setRefreshing(false)
+      }
     }
-  }
+  }, [])
 
   // Initial data fetch
   useEffect(() => {
@@ -124,10 +167,16 @@ export default function DashboardPage() {
       ])
     }
     loadData()
-  }, [])
+  }, [fetchDashboardEntries])
 
-  // Handle checkbox toggle
+  // Handle checkbox toggle - prevent selecting entries with queued jobs
   const handleCheckboxToggle = (entryId: number) => {
+    const entry = dashboardEntries.find((e) => e.entry_id === entryId)
+    // Don't allow selection if job is queued
+    if (entry && entry.nuccor_queue_entry !== null) {
+      return
+    }
+    
     setSelectedEntries((prev) => {
       const newSet = new Set(prev)
       if (newSet.has(entryId)) {
@@ -139,16 +188,50 @@ export default function DashboardPage() {
     })
   }
 
-  // Handle check all
+  // Handle check all - only select entries without queued jobs
   const handleCheckAll = () => {
-    if (selectedEntries.size === dashboardEntries.length) {
+    const selectableEntries = dashboardEntries.filter(
+      (entry) => entry.nuccor_queue_entry === null
+    )
+    const selectableIds = new Set(selectableEntries.map((entry) => entry.entry_id))
+    
+    // Check if all selectable entries are already selected
+    const allSelectableSelected = selectableIds.size > 0 && 
+      Array.from(selectableIds).every((id) => selectedEntries.has(id))
+    
+    if (allSelectableSelected) {
       // Uncheck all
       setSelectedEntries(new Set())
     } else {
-      // Check all
-      setSelectedEntries(new Set(dashboardEntries.map((entry) => entry.entry_id)))
+      // Check all selectable entries
+      setSelectedEntries(new Set(selectableIds))
     }
   }
+  
+  // Manual refresh handler
+  const handleRefresh = async () => {
+    await fetchDashboardEntries(true)
+  }
+  
+  // Setup auto-refresh timer
+  useEffect(() => {
+    if (autoRefreshEnabled) {
+      // Refresh every 5 seconds
+      refreshIntervalRef.current = setInterval(() => {
+        fetchDashboardEntries(false)
+      }, 5000)
+      
+      return () => {
+        if (refreshIntervalRef.current) {
+          clearInterval(refreshIntervalRef.current)
+        }
+      }
+    } else {
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current)
+      }
+    }
+  }, [autoRefreshEnabled, fetchDashboardEntries])
 
   // Handle run check
   const handleRunCheck = async () => {
@@ -163,12 +246,23 @@ export default function DashboardPage() {
       return
     }
 
+    // Filter out entries that already have queued jobs (safety check)
+    const validEntries = Array.from(selectedEntries).filter((entryId) => {
+      const entry = dashboardEntries.find((e) => e.entry_id === entryId)
+      return entry && entry.nuccor_queue_entry === null
+    })
+
+    if (validEntries.length === 0) {
+      setRunCheckError('Selected entries already have jobs queued')
+      return
+    }
+
     setRunCheckLoading(true)
     setRunCheckError(null)
 
     try {
       // Call order_dashboard_job for each selected entry
-      const promises = Array.from(selectedEntries).map((entryId) =>
+      const promises = validEntries.map((entryId) =>
         supabase.rpc('order_dashboard_job', {
           p_job_type: 1, // Currently there is only one job. Has to be amended later
           p_entry_id: entryId,
@@ -187,7 +281,7 @@ export default function DashboardPage() {
 
       // Clear selection and refresh dashboard entries
       setSelectedEntries(new Set())
-      await fetchDashboardEntries()
+      await fetchDashboardEntries(false)
     } catch (err: any) {
       setRunCheckError(err.message || 'Failed to queue jobs')
       console.error('Error running check:', err)
@@ -288,6 +382,42 @@ export default function DashboardPage() {
               />
             </div>
             <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg shadow-sm transition-colors flex items-center gap-2"
+              title="Refresh dashboard entries"
+            >
+              <svg
+                className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="auto-refresh"
+                checked={autoRefreshEnabled}
+                onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
+                className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+              />
+              <label
+                htmlFor="auto-refresh"
+                className="text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer"
+              >
+                Auto-refresh
+              </label>
+            </div>
+            <button
               onClick={handleRunCheck}
               disabled={runCheckLoading || selectedEntries.size === 0}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white rounded-lg shadow-sm transition-colors"
@@ -327,10 +457,19 @@ export default function DashboardPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     <input
                       type="checkbox"
-                      checked={selectedEntries.size === dashboardEntries.length && dashboardEntries.length > 0}
+                      checked={
+                        dashboardEntries.length > 0 &&
+                        dashboardEntries.filter((e) => e.nuccor_queue_entry === null).length > 0 &&
+                        dashboardEntries
+                          .filter((e) => e.nuccor_queue_entry === null)
+                          .every((e) => selectedEntries.has(e.entry_id))
+                      }
                       onChange={handleCheckAll}
                       className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
                     />
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Status
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Assay Name
@@ -347,33 +486,63 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {dashboardEntries.map((entry) => (
-                  <tr
-                    key={entry.entry_id}
-                    className="hover:bg-gray-50 dark:hover:bg-gray-700"
-                  >
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <input
-                        type="checkbox"
-                        checked={selectedEntries.has(entry.entry_id)}
-                        onChange={() => handleCheckboxToggle(entry.entry_id)}
-                        className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                      />
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                      {entry.assay_name}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
-                      {entry.lookback_days !== null ? entry.lookback_days : '—'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
-                      {formatDate(entry.last_checked)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
-                      {entry.nuccor_entries_found !== null ? entry.nuccor_entries_found : '—'}
-                    </td>
-                  </tr>
-                ))}
+                {dashboardEntries.map((entry) => {
+                  const hasQueuedJob = entry.nuccor_queue_entry !== null
+                  return (
+                    <tr
+                      key={entry.entry_id}
+                      className={`hover:bg-gray-50 dark:hover:bg-gray-700 ${
+                        hasQueuedJob ? 'opacity-75' : ''
+                      }`}
+                    >
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          checked={selectedEntries.has(entry.entry_id)}
+                          onChange={() => handleCheckboxToggle(entry.entry_id)}
+                          disabled={hasQueuedJob}
+                          className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {hasQueuedJob ? (
+                          <span className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
+                            <svg
+                              className="w-3 h-3 animate-spin"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                              />
+                            </svg>
+                            Queued
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                            Ready
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                        {entry.assay_name}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
+                        {entry.lookback_days !== null ? entry.lookback_days : '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
+                        {formatDate(entry.last_checked)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
+                        {entry.nuccor_entries_found !== null ? entry.nuccor_entries_found : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
