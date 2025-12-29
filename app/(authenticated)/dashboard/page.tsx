@@ -170,7 +170,7 @@ export default function DashboardPage() {
       // Call order_dashboard_job for each selected entry
       const promises = Array.from(selectedEntries).map((entryId) =>
         supabase.rpc('order_dashboard_job', {
-          p_job_type: '1', // As specified by user
+          p_job_type: 1, // Currently there is only one job. Has to be amended later
           p_entry_id: entryId,
           p_lookback_days: lookbackDaysNum,
         })
