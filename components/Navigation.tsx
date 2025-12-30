@@ -19,6 +19,7 @@ export default function Navigation() {
     { href: '/taxid', label: 'taxID area' },
     { href: '/oligo-repository', label: 'Oligo repository' },
     { href: '/assay-repository', label: 'Assay repository' },
+    { href: '/blast-planner', label: 'BLAST planner' },
   ]
 
   const isActive = (href: string) => {
