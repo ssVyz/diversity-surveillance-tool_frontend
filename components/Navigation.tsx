@@ -20,6 +20,7 @@ export default function Navigation() {
     { href: '/oligo-repository', label: 'Oligo repository' },
     { href: '/assay-repository', label: 'Assay repository' },
     { href: '/blast-planner', label: 'BLAST planner' },
+    { href: '/blast-results', label: 'BLAST results' },
   ]
 
   const isActive = (href: string) => {
