@@ -387,11 +387,88 @@ function ResultViewer({ job, result, assayName, onClose }: ResultViewerProps) {
   const handleExportCSV = () => {
     const rows: string[][] = []
 
+    // Helper function to add a row
+    const addRow = (cells: string[]) => {
+      rows.push(cells)
+    }
+
+    // Helper function to add an empty row
+    const addEmptyRow = () => {
+      rows.push([''])
+    }
+
+    // Helper function to add a section header
+    const addSectionHeader = (title: string) => {
+      addEmptyRow()
+      addRow([title])
+      addRow(['']) // Empty row after header
+    }
+
+    // ============================================
+    // METADATA SECTION
+    // ============================================
+
+    // Assay Name and Date Range
+    addSectionHeader('Job Information')
+    addRow(['Assay Name', assayName])
+    addRow(['Job ID', job.align_id.toString()])
+    addRow(['Date Range', `${job.alignjob_date_from} to ${job.alignjob_date_to}`])
+
+    // Statistics
+    addSectionHeader('Statistics')
+    addRow(['Alignment Rate (%)', result.statistics.alignment_rate.toString()])
+    addRow(['Total BLAST Hits', result.statistics.total_blast_hits.toString()])
+    addRow(['Sequences Aligned', result.statistics.sequences_aligned.toString()])
+    addRow(['Filtered BLAST Hits', result.statistics.filtered_blast_hits.toString()])
+    addRow(['Sequences with Min Matches', result.statistics.sequences_with_min_matches.toString()])
+
+    // Per-Oligo Statistics
+    if (result.per_oligo_stats && Object.keys(result.per_oligo_stats).length > 0) {
+      addSectionHeader('Per-Oligo Statistics')
+      // Header row
+      addRow(['Oligo Name', 'Match Rate (%)', 'Sense Matches', 'Antisense Matches', 'Total Matches'])
+      // Data rows
+      Object.entries(result.per_oligo_stats).forEach(([oligoName, stats]) => {
+        addRow([
+          oligoName,
+          stats.match_rate.toString(),
+          stats.sense_matches.toString(),
+          stats.antisense_matches.toString(),
+          stats.total_matches.toString(),
+        ])
+      })
+    }
+
+    // Input Parameters
+    addSectionHeader('Input Parameters')
+    addRow(['Date From', job.alignjob_date_from])
+    addRow(['Date To', job.alignjob_date_to])
+    addRow(['TaxID', job.alignjob_taxid.toString()])
+    addRow([''])
+    addRow(['BLAST Parameters'])
+    addRow(['Identity (%)', job.alignjob_identity?.toString() || 'N/A'])
+    addRow(['Coverage (%)', job.alignjob_coverage?.toString() || 'N/A'])
+    addRow([''])
+    addRow(['Pairwise Aligner Parameters'])
+    addRow(['Match Score', job.alignjob_match_score?.toString() || 'N/A'])
+    addRow(['Mismatch Score', job.alignjob_mismatch_score?.toString() || 'N/A'])
+    addRow(['Open Gap Penalty', job.alignjob_opengap?.toString() || 'N/A'])
+    addRow(['Extend Gap Penalty', job.alignjob_extendgap?.toString() || 'N/A'])
+    addRow([''])
+    addRow(['Other Parameters'])
+    addRow(['Oligo Min Cover', job.alignjob_oligo_min_cover?.toString() || 'N/A'])
+
+    // ============================================
+    // ALIGNMENT PATTERNS TABLE
+    // ============================================
+
+    addSectionHeader('Alignment Patterns')
+
     // Header row: oligo names
-    rows.push([...oligoNames, 'Count', 'Total Mismatches', 'Examples'])
+    addRow([...oligoNames, 'Count', 'Total Mismatches', 'Examples'])
 
     // Second row: oligo sequences
-    rows.push([...oligoSequences, '', '', ''])
+    addRow([...oligoSequences, '', '', ''])
 
     // Pattern rows
     result.patterns.forEach((pattern) => {
@@ -414,7 +491,7 @@ function ResultViewer({ job, result, assayName, onClose }: ResultViewerProps) {
         alignmentStrings.push('')
       }
 
-      rows.push([
+      addRow([
         ...alignmentStrings.slice(0, oligoNames.length),
         pattern.count.toString(),
         pattern.total_mismatches.toString(),
