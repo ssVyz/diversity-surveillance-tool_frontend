@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -55,6 +55,34 @@ export default function OligoRepositoryPage() {
     failed: number
     errors: Array<{ name: string; error: string }>
   } | null>(null)
+
+  // Get assay name by ID
+  const getAssayName = (assayId: number | null) => {
+    if (assayId === null || assayId === undefined) return 'Not assigned'
+    const assay = assays.find((a) => a.assay_id === assayId)
+    return assay ? assay.assay_name : 'Unknown'
+  }
+
+  // Get display label for oligo type
+  const getOligoTypeDisplay = (oligoType: string | null) => {
+    if (!oligoType) return 'Undefined'
+    return oligoType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  }
+
+  // Filter state
+  const [filterText, setFilterText] = useState('')
+
+  // Filtered oligos based on text input
+  const filteredOligos = useMemo(() => {
+    if (!filterText.trim()) return oligos
+    const lower = filterText.trim().toLowerCase()
+    return oligos.filter((oligo) =>
+      oligo.sequence_name.toLowerCase().includes(lower) ||
+      oligo.dna_sequence.toLowerCase().includes(lower) ||
+      getAssayName(oligo.assay_id).toLowerCase().includes(lower) ||
+      getOligoTypeDisplay(oligo.oligo_type).toLowerCase().includes(lower)
+    )
+  }, [oligos, filterText, assays])
 
   // Fetch oligos
   const fetchOligos = async () => {
@@ -318,12 +346,12 @@ export default function OligoRepositoryPage() {
     })
   }
 
-  // Handle select all
+  // Handle select all (operates on filtered list)
   const handleSelectAll = () => {
-    if (selectedOligos.size === oligos.length) {
+    if (selectedOligos.size === filteredOligos.length) {
       setSelectedOligos(new Set())
     } else {
-      setSelectedOligos(new Set(oligos.map((o) => o.oligo_id)))
+      setSelectedOligos(new Set(filteredOligos.map((o) => o.oligo_id)))
     }
   }
 
@@ -469,12 +497,6 @@ export default function OligoRepositoryPage() {
     }
   }
 
-  // Get display label for oligo type
-  const getOligoTypeDisplay = (oligoType: string | null) => {
-    if (!oligoType) return 'Undefined'
-    return oligoType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-  }
-
   // Format date
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -494,20 +516,20 @@ export default function OligoRepositoryPage() {
     return `${sequence.substring(0, maxLength)}...`
   }
 
-  // Get assay name by ID
-  const getAssayName = (assayId: number | null) => {
-    if (assayId === null || assayId === undefined) return 'Not assigned'
-    const assay = assays.find((a) => a.assay_id === assayId)
-    return assay ? assay.assay_name : 'Unknown'
-  }
-
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
           Oligo Repository
         </h1>
-        <div className="flex gap-3">
+        <div className="flex gap-3 items-center">
+          <input
+            type="text"
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+            placeholder="Filter oligos..."
+            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+          />
           <button
             onClick={() => setShowImportForm(!showImportForm)}
             className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg shadow-sm transition-colors"
@@ -846,7 +868,7 @@ export default function OligoRepositoryPage() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       <input
                         type="checkbox"
-                        checked={selectedOligos.size === oligos.length && oligos.length > 0}
+                        checked={selectedOligos.size === filteredOligos.length && filteredOligos.length > 0}
                         onChange={handleSelectAll}
                         className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                       />
@@ -869,7 +891,7 @@ export default function OligoRepositoryPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                  {oligos.map((oligo) => (
+                  {filteredOligos.map((oligo) => (
                     <tr 
                       key={oligo.oligo_id} 
                       className={`hover:bg-gray-50 dark:hover:bg-gray-700 ${selectedOligos.has(oligo.oligo_id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
