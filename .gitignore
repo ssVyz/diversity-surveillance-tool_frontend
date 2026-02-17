@@ -38,4 +38,5 @@ next-env.d.ts
 # db reference
 db_schema_for_reference/
 reference_files/
+old_files/
 
