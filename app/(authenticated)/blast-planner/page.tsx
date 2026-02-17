@@ -27,8 +27,8 @@ export default function BlastPlannerPage() {
   const [coverage, setCoverage] = useState<string>('80.0')
   const [matchScore, setMatchScore] = useState<string>('2.0')
   const [mismatchScore, setMismatchScore] = useState<string>('-1.0')
-  const [openGap, setOpenGap] = useState<string>('-0.5')
-  const [extendGap, setExtendGap] = useState<string>('-0.1')
+  const [openGap, setOpenGap] = useState<string>('-1.0')
+  const [extendGap, setExtendGap] = useState<string>('-1.0')
   const [oligoMinCover, setOligoMinCover] = useState<string>('1')
   const [maxMismatchOligo, setMaxMismatchOligo] = useState<string>('7')
 
