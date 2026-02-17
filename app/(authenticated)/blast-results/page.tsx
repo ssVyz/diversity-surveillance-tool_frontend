@@ -58,10 +58,16 @@ interface OligoOrder {
   reverse_primers: string[]
 }
 
+interface OligoSignature {
+  category: string
+  oligo_id: string
+  signature: string
+}
+
 interface PatternEntry {
   pattern_number: number
   combined_signature: string
-  per_oligo_signatures: string[]
+  per_oligo_signatures: OligoSignature[]
   count: number
   percentage: number
   total_mismatches: number
@@ -106,9 +112,11 @@ interface OverallPattern {
 
 interface ResultSummary {
   total_sequences: number
-  sequences_with_min_matches: number
+  sequences_meeting_thresholds: number
+  threshold_percentage: number
   sequences_with_valid_amplicon: number
-  sequences_failed_amplicon: number
+  valid_amplicon_percentage: number
+  sequences_without_valid_amplicon: number
 }
 
 interface ResultData {
@@ -553,9 +561,9 @@ function ResultViewer({ job, result, assayName, onClose }: ResultViewerProps) {
     for (const pat of patterns) {
       ws.getCell(row, 1).value = pat.pattern_number
       // Per-oligo signatures
-      pat.per_oligo_signatures.forEach((sig, i) => {
+      pat.per_oligo_signatures.forEach((sigObj, i) => {
         if (i < totalOligos) {
-          ws.getCell(row, i + 2).value = sig
+          ws.getCell(row, i + 2).value = sigObj.signature
           ws.getCell(row, i + 2).font = monoFont
         }
       })
@@ -604,8 +612,8 @@ function ResultViewer({ job, result, assayName, onClose }: ResultViewerProps) {
       row++
       ws.getCell(row, 1).value = `Total sequences analyzed: ${summary.total_sequences}`
       row++
-      const meetPct = summary.total_sequences > 0 ? ((summary.sequences_with_min_matches / summary.total_sequences) * 100).toFixed(1) : '0.0'
-      ws.getCell(row, 1).value = `Sequences meeting all thresholds: ${summary.sequences_with_min_matches} (${meetPct}%)`
+      const meetPct = summary.total_sequences > 0 ? ((summary.sequences_meeting_thresholds / summary.total_sequences) * 100).toFixed(1) : '0.0'
+      ws.getCell(row, 1).value = `Sequences meeting all thresholds: ${summary.sequences_meeting_thresholds} (${meetPct}%)`
       row += 2
 
       // Amplicon Statistics
@@ -615,7 +623,7 @@ function ResultViewer({ job, result, assayName, onClose }: ResultViewerProps) {
       const ampPct = summary.total_sequences > 0 ? ((summary.sequences_with_valid_amplicon / summary.total_sequences) * 100).toFixed(1) : '0.0'
       ws.getCell(row, 1).value = `Sequences with valid amplicon: ${summary.sequences_with_valid_amplicon} (${ampPct}%)`
       row++
-      ws.getCell(row, 1).value = `Sequences without valid amplicon: ${summary.sequences_failed_amplicon}`
+      ws.getCell(row, 1).value = `Sequences without valid amplicon: ${summary.sequences_without_valid_amplicon}`
       row += 2
     }
 
@@ -826,9 +834,9 @@ function ResultViewer({ job, result, assayName, onClose }: ResultViewerProps) {
                   <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
                     <p className="text-sm text-gray-600 dark:text-gray-400">Meeting Thresholds</p>
                     <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {summary.sequences_with_min_matches}
+                      {summary.sequences_meeting_thresholds}
                       <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-1">
-                        ({summary.total_sequences > 0 ? ((summary.sequences_with_min_matches / summary.total_sequences) * 100).toFixed(1) : '0.0'}%)
+                        ({summary.total_sequences > 0 ? ((summary.sequences_meeting_thresholds / summary.total_sequences) * 100).toFixed(1) : '0.0'}%)
                       </span>
                     </p>
                   </div>
@@ -843,7 +851,7 @@ function ResultViewer({ job, result, assayName, onClose }: ResultViewerProps) {
                   </div>
                   <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
                     <p className="text-sm text-gray-600 dark:text-gray-400">No Valid Amplicon</p>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white">{summary.sequences_failed_amplicon}</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">{summary.sequences_without_valid_amplicon}</p>
                   </div>
                 </>
               )}
@@ -929,7 +937,8 @@ function ResultViewer({ job, result, assayName, onClose }: ResultViewerProps) {
                         {pat.pattern_number}
                       </td>
                       {allOligoIds.map((_, idx) => {
-                        const sig = pat.per_oligo_signatures[idx] || ''
+                        const sigObj = pat.per_oligo_signatures[idx]
+                        const sig = sigObj ? sigObj.signature : ''
                         const isNoMatch = sig === 'NO_MATCH'
                         return (
                           <td
