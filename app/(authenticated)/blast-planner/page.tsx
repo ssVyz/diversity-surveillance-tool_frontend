@@ -30,6 +30,7 @@ export default function BlastPlannerPage() {
   const [openGap, setOpenGap] = useState<string>('-0.5')
   const [extendGap, setExtendGap] = useState<string>('-0.1')
   const [oligoMinCover, setOligoMinCover] = useState<string>('1')
+  const [maxMismatchOligo, setMaxMismatchOligo] = useState<string>('7')
 
   // Fetch planning list
   const fetchPlanningList = async () => {
@@ -107,6 +108,7 @@ export default function BlastPlannerPage() {
       { name: 'Open Gap', value: openGap },
       { name: 'Extend Gap', value: extendGap },
       { name: 'Oligo Min Cover', value: oligoMinCover },
+      { name: 'Max Mismatch per Oligo', value: maxMismatchOligo },
     ]
 
     for (const field of numFields) {
@@ -120,6 +122,12 @@ export default function BlastPlannerPage() {
     const oligoMinCoverNum = parseInt(oligoMinCover)
     if (isNaN(oligoMinCoverNum) || oligoMinCoverNum < 1) {
       return 'Oligo Min Cover must be an integer greater than or equal to 1'
+    }
+
+    // Validate max_mismatch_oligo is an integer >= 0
+    const maxMismatchNum = parseInt(maxMismatchOligo)
+    if (isNaN(maxMismatchNum) || maxMismatchNum < 0) {
+      return 'Max Mismatch per Oligo must be a non-negative integer'
     }
 
     return null
@@ -158,6 +166,7 @@ export default function BlastPlannerPage() {
             p_opengap: parseFloat(openGap),
             p_extendgap: parseFloat(extendGap),
             p_oligo_min_cover: parseInt(oligoMinCover),
+            p_max_mismatch_oligo: parseInt(maxMismatchOligo),
           })
 
           if (orderError) {
@@ -372,27 +381,50 @@ export default function BlastPlannerPage() {
             </div>
           </div>
 
-          {/* Oligo Min Cover */}
-          <div>
-            <label
-              htmlFor="oligoMinCover"
-              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-            >
-              Oligo Minimum Coverage <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="number"
-              id="oligoMinCover"
-              value={oligoMinCover}
-              onChange={(e) => setOligoMinCover(e.target.value)}
-              min="1"
-              step="1"
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-            />
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Minimum number of oligos that must cover a sequence region
-            </p>
+          {/* Oligo Parameters */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label
+                htmlFor="oligoMinCover"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              >
+                Oligo Minimum Coverage <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                id="oligoMinCover"
+                value={oligoMinCover}
+                onChange={(e) => setOligoMinCover(e.target.value)}
+                min="1"
+                step="1"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Minimum number of oligos that must cover a sequence region
+              </p>
+            </div>
+            <div>
+              <label
+                htmlFor="maxMismatchOligo"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              >
+                Max Mismatch per Oligo <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                id="maxMismatchOligo"
+                value={maxMismatchOligo}
+                onChange={(e) => setMaxMismatchOligo(e.target.value)}
+                min="0"
+                step="1"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Maximum number of mismatches allowed per oligo alignment
+              </p>
+            </div>
           </div>
 
           {/* Submit button in form (for keyboard accessibility, main button is in list section) */}
@@ -453,8 +485,8 @@ export default function BlastPlannerPage() {
             <ul className="text-sm text-gray-500 dark:text-gray-400 list-disc list-inside space-y-1">
               <li>A target taxid</li>
               <li>A reference amplicon</li>
-              <li>At least one oligo</li>
-              <li>Not already in a BLAST aligner job</li>
+              <li>At least one forward primer and one reverse primer</li>
+              <li>No pending (non-done) BLAST aligner jobs</li>
             </ul>
           </div>
         ) : (
