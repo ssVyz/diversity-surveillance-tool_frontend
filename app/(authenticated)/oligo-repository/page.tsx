@@ -71,18 +71,25 @@ export default function OligoRepositoryPage() {
 
   // Filter state
   const [filterText, setFilterText] = useState('')
+  const [filterField, setFilterField] = useState<'name' | 'type' | 'assay' | 'sequence'>('name')
 
-  // Filtered oligos based on text input
+  // Filtered oligos based on selected field and text input
   const filteredOligos = useMemo(() => {
     if (!filterText.trim()) return oligos
     const lower = filterText.trim().toLowerCase()
-    return oligos.filter((oligo) =>
-      oligo.sequence_name.toLowerCase().includes(lower) ||
-      oligo.dna_sequence.toLowerCase().includes(lower) ||
-      getAssayName(oligo.assay_id).toLowerCase().includes(lower) ||
-      getOligoTypeDisplay(oligo.oligo_type).toLowerCase().includes(lower)
-    )
-  }, [oligos, filterText, assays])
+    return oligos.filter((oligo) => {
+      switch (filterField) {
+        case 'name':
+          return oligo.sequence_name.toLowerCase().includes(lower)
+        case 'type':
+          return getOligoTypeDisplay(oligo.oligo_type).toLowerCase().includes(lower)
+        case 'assay':
+          return getAssayName(oligo.assay_id).toLowerCase().includes(lower)
+        case 'sequence':
+          return oligo.dna_sequence.toLowerCase().includes(lower)
+      }
+    })
+  }, [oligos, filterText, filterField, assays])
 
   // Fetch oligos
   const fetchOligos = async () => {
@@ -523,6 +530,16 @@ export default function OligoRepositoryPage() {
           Oligo Repository
         </h1>
         <div className="flex gap-3 items-center">
+          <select
+            value={filterField}
+            onChange={(e) => setFilterField(e.target.value as 'name' | 'type' | 'assay' | 'sequence')}
+            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+          >
+            <option value="name">Oligo Name</option>
+            <option value="type">Oligo Type</option>
+            <option value="assay">Assay</option>
+            <option value="sequence">Sequence</option>
+          </select>
           <input
             type="text"
             value={filterText}
