@@ -23,7 +23,7 @@ export default function BlastPlannerPage() {
   // Form state for BLAST parameters
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [identity, setIdentity] = useState<string>('95.0')
+  const [identity, setIdentity] = useState<string>('90.0')
   const [coverage, setCoverage] = useState<string>('80.0')
   const [matchScore, setMatchScore] = useState<string>('2.0')
   const [mismatchScore, setMismatchScore] = useState<string>('-1.0')
