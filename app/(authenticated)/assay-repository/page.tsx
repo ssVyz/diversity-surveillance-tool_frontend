@@ -37,6 +37,8 @@ export default function AssayRepositoryPage() {
   const [targetGene, setTargetGene] = useState('')
   const [ampliconSequence, setAmpliconSequence] = useState('')
   const [ampliconName, setAmpliconName] = useState('')
+  const [ampliconLenLowerBound, setAmpliconLenLowerBound] = useState<string>('')
+  const [ampliconLenUpperBound, setAmpliconLenUpperBound] = useState<string>('')
   const [formError, setFormError] = useState<string | null>(null)
 
   // Import state
@@ -251,6 +253,23 @@ export default function AssayRepositoryPage() {
       return
     }
 
+    // Validate amplicon length bounds
+    const lowerBound = ampliconLenLowerBound.trim() ? parseInt(ampliconLenLowerBound.trim()) : null
+    const upperBound = ampliconLenUpperBound.trim() ? parseInt(ampliconLenUpperBound.trim()) : null
+
+    if (lowerBound !== null && (isNaN(lowerBound) || lowerBound < 0)) {
+      setFormError('Amplicon length lower bound must be a non-negative number')
+      return
+    }
+    if (upperBound !== null && (isNaN(upperBound) || upperBound < 0)) {
+      setFormError('Amplicon length upper bound must be a non-negative number')
+      return
+    }
+    if (lowerBound !== null && upperBound !== null && lowerBound > upperBound) {
+      setFormError('Amplicon length lower bound cannot exceed upper bound')
+      return
+    }
+
     setFormLoading(true)
 
     try {
@@ -260,6 +279,8 @@ export default function AssayRepositoryPage() {
         p_target_taxid: targetTaxid !== null && targetTaxid !== undefined ? targetTaxid : null,
         p_target_gene: targetGene.trim() || null,
         p_amplicon_name: ampliconName.trim() || null,
+        p_amplicon_len_lower_bound: lowerBound,
+        p_amplicon_len_upper_bound: upperBound,
       })
 
       if (createError) {
@@ -272,6 +293,8 @@ export default function AssayRepositoryPage() {
       setTargetGene('')
       setAmpliconSequence('')
       setAmpliconName('')
+      setAmpliconLenLowerBound('')
+      setAmpliconLenUpperBound('')
       setShowForm(false)
       setFormError(null)
 
@@ -356,6 +379,8 @@ export default function AssayRepositoryPage() {
                 setTargetGene('')
                 setAmpliconSequence('')
                 setAmpliconName('')
+                setAmpliconLenLowerBound('')
+                setAmpliconLenUpperBound('')
                 setFormError(null)
               }
             }}
@@ -537,6 +562,43 @@ export default function AssayRepositoryPage() {
               />
             </div>
 
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label
+                  htmlFor="ampliconLenLowerBound"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                >
+                  Amplicon Length Lower Bound (Optional)
+                </label>
+                <input
+                  type="number"
+                  id="ampliconLenLowerBound"
+                  value={ampliconLenLowerBound}
+                  onChange={(e) => setAmpliconLenLowerBound(e.target.value)}
+                  min="0"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g. 100"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="ampliconLenUpperBound"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                >
+                  Amplicon Length Upper Bound (Optional)
+                </label>
+                <input
+                  type="number"
+                  id="ampliconLenUpperBound"
+                  value={ampliconLenUpperBound}
+                  onChange={(e) => setAmpliconLenUpperBound(e.target.value)}
+                  min="0"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g. 500"
+                />
+              </div>
+            </div>
+
             {formError && (
               <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
                 <p className="text-sm text-red-800 dark:text-red-200">{formError}</p>
@@ -560,6 +622,8 @@ export default function AssayRepositoryPage() {
                   setTargetGene('')
                   setAmpliconSequence('')
                   setAmpliconName('')
+                  setAmpliconLenLowerBound('')
+                  setAmpliconLenUpperBound('')
                   setFormError(null)
                 }}
                 className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 rounded-lg transition-colors"
