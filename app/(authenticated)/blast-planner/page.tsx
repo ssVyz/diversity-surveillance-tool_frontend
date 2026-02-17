@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -19,6 +19,23 @@ export default function BlastPlannerPage() {
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [selectedEntries, setSelectedEntries] = useState<Set<number>>(new Set())
+
+  // Filter and sort state for assay list
+  const [assayFilter, setAssayFilter] = useState('')
+  const [sortAsc, setSortAsc] = useState(true)
+
+  const filteredEntries = useMemo(() => {
+    let result = entries
+    if (assayFilter.trim()) {
+      const lower = assayFilter.trim().toLowerCase()
+      result = result.filter((e) => e.assay_name.toLowerCase().includes(lower))
+    }
+    return [...result].sort((a, b) =>
+      sortAsc
+        ? a.assay_name.localeCompare(b.assay_name)
+        : b.assay_name.localeCompare(a.assay_name)
+    )
+  }, [entries, assayFilter, sortAsc])
 
   // Form state for BLAST parameters
   const [dateFrom, setDateFrom] = useState('')
@@ -78,12 +95,12 @@ export default function BlastPlannerPage() {
     setSelectedEntries(newSelected)
   }
 
-  // Handle "check all" toggle
+  // Handle "check all" toggle (operates on filtered list)
   const handleSelectAll = () => {
-    if (selectedEntries.size === entries.length) {
+    if (selectedEntries.size === filteredEntries.length) {
       setSelectedEntries(new Set())
     } else {
-      setSelectedEntries(new Set(entries.map((e) => e.planner_entry_id)))
+      setSelectedEntries(new Set(filteredEntries.map((e) => e.planner_entry_id)))
     }
   }
 
@@ -445,16 +462,30 @@ export default function BlastPlannerPage() {
 
       {/* Assay List Section */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
-        <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex flex-wrap justify-between items-center gap-4">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
             Eligible Assays
           </h2>
           {entries.length > 0 && (
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <input
+                type="text"
+                value={assayFilter}
+                onChange={(e) => setAssayFilter(e.target.value)}
+                placeholder="Filter by name..."
+                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+              />
+              <button
+                onClick={() => setSortAsc((prev) => !prev)}
+                className="px-3 py-2 text-sm bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 rounded-lg transition-colors"
+                title={sortAsc ? 'Sorted A-Z, click for Z-A' : 'Sorted Z-A, click for A-Z'}
+              >
+                Name {sortAsc ? 'A-Z' : 'Z-A'}
+              </button>
               <label className="flex items-center cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={selectedEntries.size === entries.length && entries.length > 0}
+                  checked={selectedEntries.size === filteredEntries.length && filteredEntries.length > 0}
                   onChange={handleSelectAll}
                   className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                 />
@@ -497,7 +528,7 @@ export default function BlastPlannerPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-12">
                     <input
                       type="checkbox"
-                      checked={selectedEntries.size === entries.length && entries.length > 0}
+                      checked={selectedEntries.size === filteredEntries.length && filteredEntries.length > 0}
                       onChange={handleSelectAll}
                       className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                     />
@@ -511,7 +542,7 @@ export default function BlastPlannerPage() {
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {entries.map((entry) => (
+                {filteredEntries.map((entry) => (
                   <tr
                     key={entry.planner_entry_id}
                     className={`hover:bg-gray-50 dark:hover:bg-gray-700 ${
