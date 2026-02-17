@@ -458,9 +458,9 @@ function ResultViewer({ job, result, assayName, onClose }: ResultViewerProps) {
   // Build ordered oligo list from oligo_order
   const oligoOrder = result.oligo_order || { forward_primers: [], probes: [], reverse_primers: [] }
   const allOligoIds = [
-    ...oligoOrder.forward_primers,
-    ...oligoOrder.probes,
-    ...oligoOrder.reverse_primers,
+    ...(oligoOrder.forward_primers || []),
+    ...(oligoOrder.probes || []),
+    ...(oligoOrder.reverse_primers || []),
   ]
   const oligoSequences = result.oligo_sequences || {}
   const settings = result.settings_used || {}
@@ -472,9 +472,9 @@ function ResultViewer({ job, result, assayName, onClose }: ResultViewerProps) {
   const overall = result.overall_pattern
 
   // Category boundary indices for column grouping
-  const nFwd = oligoOrder.forward_primers.length
-  const nProbe = oligoOrder.probes.length
-  const nRev = oligoOrder.reverse_primers.length
+  const nFwd = (oligoOrder.forward_primers || []).length
+  const nProbe = (oligoOrder.probes || []).length
+  const nRev = (oligoOrder.reverse_primers || []).length
 
   // Group per-oligo stats by category
   const fwdStats = perOligoStats.filter((s) => s.category === 'forward_primer')
