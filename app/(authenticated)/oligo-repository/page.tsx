@@ -12,7 +12,10 @@ interface Oligo {
   dna_sequence: string
   created_at: string
   assay_id: number | null
+  oligo_type: string | null
 }
+
+const OLIGO_TYPES = ['forward_primer', 'reverse_primer', 'probe'] as const
 
 interface Assay {
   assay_id: number
@@ -32,6 +35,8 @@ export default function OligoRepositoryPage() {
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false)
   const [bulkChangeAssayLoading, setBulkChangeAssayLoading] = useState(false)
   const [bulkAssayId, setBulkAssayId] = useState<number | null>(null)
+  const [bulkChangeTypeLoading, setBulkChangeTypeLoading] = useState(false)
+  const [bulkOligoType, setBulkOligoType] = useState<string>('')
 
   // Form state
   const [sequenceName, setSequenceName] = useState('')
@@ -418,6 +423,58 @@ export default function OligoRepositoryPage() {
     }
   }
 
+  // Handle bulk change oligo type
+  const handleBulkChangeOligoType = async () => {
+    if (selectedOligos.size === 0) {
+      setError('Please select at least one oligo to modify')
+      return
+    }
+
+    setBulkChangeTypeLoading(true)
+    setError(null)
+
+    try {
+      const oligoIds = Array.from(selectedOligos)
+      const errors: string[] = []
+      const typeValue = bulkOligoType === 'undefined' ? null : bulkOligoType
+
+      for (const oligoId of oligoIds) {
+        try {
+          const { error: changeError } = await supabase.rpc('change_user_oligo_type', {
+            p_oligo_id: oligoId,
+            p_oligo_type: typeValue,
+          })
+
+          if (changeError) {
+            errors.push(`Oligo ${oligoId}: ${changeError.message}`)
+          }
+        } catch (err: any) {
+          errors.push(`Oligo ${oligoId}: ${err.message || 'Unknown error'}`)
+        }
+      }
+
+      if (errors.length > 0) {
+        setError(`Some changes failed:\n${errors.join('\n')}`)
+      } else {
+        setSelectedOligos(new Set())
+        setBulkOligoType('')
+      }
+
+      await fetchOligos()
+    } catch (err: any) {
+      setError(err.message || 'Failed to change oligo types')
+      console.error('Error changing oligo types:', err)
+    } finally {
+      setBulkChangeTypeLoading(false)
+    }
+  }
+
+  // Get display label for oligo type
+  const getOligoTypeDisplay = (oligoType: string | null) => {
+    if (!oligoType) return 'Undefined'
+    return oligoType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  }
+
   // Format date
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -738,6 +795,32 @@ export default function OligoRepositoryPage() {
                         {bulkChangeAssayLoading ? 'Changing...' : 'Apply'}
                       </button>
                     </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-gray-700 dark:text-gray-300">
+                        Change Type:
+                      </label>
+                      <select
+                        value={bulkOligoType}
+                        onChange={(e) => setBulkOligoType(e.target.value)}
+                        className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        disabled={bulkChangeTypeLoading}
+                      >
+                        <option value="">Select type...</option>
+                        <option value="undefined">Undefined</option>
+                        {OLIGO_TYPES.map((type) => (
+                          <option key={type} value={type}>
+                            {type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={handleBulkChangeOligoType}
+                        disabled={bulkChangeTypeLoading || !bulkOligoType}
+                        className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg shadow-sm transition-colors"
+                      >
+                        {bulkChangeTypeLoading ? 'Changing...' : 'Apply'}
+                      </button>
+                    </div>
                     <button
                       onClick={handleBulkDelete}
                       disabled={bulkDeleteLoading}
@@ -775,6 +858,9 @@ export default function OligoRepositoryPage() {
                       DNA Sequence
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Oligo Type
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       Assay
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
@@ -803,6 +889,9 @@ export default function OligoRepositoryPage() {
                         <span title={oligo.dna_sequence}>
                           {truncateSequence(oligo.dna_sequence)}
                         </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
+                        {getOligoTypeDisplay(oligo.oligo_type)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
                         {getAssayName(oligo.assay_id)}
