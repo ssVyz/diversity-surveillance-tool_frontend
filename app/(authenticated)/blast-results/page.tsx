@@ -373,7 +373,7 @@ async function generatePdfBlob(
   assayName: string
 ): Promise<Blob> {
   const { default: jsPDF } = await import('jspdf')
-  await import('jspdf-autotable')
+  const { default: autoTable } = await import('jspdf-autotable')
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
   const pageWidth = doc.internal.pageSize.getWidth()
@@ -450,7 +450,7 @@ async function generatePdfBlob(
     if (settings.max_amplicon_size != null) settingsRows.push(['Max Amplicon Size', String(settings.max_amplicon_size)])
 
     if (settingsRows.length > 0) {
-      ;(doc as any).autoTable({
+      autoTable(doc, {
         startY: y,
         head: [['Setting', 'Value']],
         body: settingsRows,
@@ -480,7 +480,7 @@ async function generatePdfBlob(
     summaryRows.push(['No Valid Amplicon', String(summary.sequences_without_valid_amplicon)])
   }
   if (summaryRows.length > 0) {
-    ;(doc as any).autoTable({
+    autoTable(doc, {
       startY: y,
       head: [['Metric', 'Value']],
       body: summaryRows,
@@ -515,7 +515,7 @@ async function generatePdfBlob(
       ]
     })]
 
-    ;(doc as any).autoTable({
+    autoTable(doc, {
       startY: y,
       head: [patternHead],
       body: patternBody,
@@ -568,7 +568,7 @@ async function generatePdfBlob(
         String(s.antisense_matches),
       ])
 
-      ;(doc as any).autoTable({
+      autoTable(doc, {
         startY: y,
         head: [['Oligo', 'Matches', 'Match Rate', 'Sense', 'Antisense']],
         body: statsBody,
@@ -616,7 +616,7 @@ async function generatePdfBlob(
         ['No match', `${d.no_match} (${d.no_match_pct.toFixed(1)}%)`],
       ]
 
-      ;(doc as any).autoTable({
+      autoTable(doc, {
         startY: y,
         head: [['Category', 'Count (%)']],
         body: distBody,
@@ -646,7 +646,7 @@ async function generatePdfBlob(
       ['No match', `${overall.no_match} (${overall.no_match_pct.toFixed(1)}%)`],
     ]
 
-    ;(doc as any).autoTable({
+    autoTable(doc, {
       startY: y,
       head: [['Category', 'Count (%)']],
       body: overallBody,
@@ -673,7 +673,7 @@ async function generatePdfBlob(
     ['Oligo Min Cover', String(job.alignjob_oligo_min_cover ?? 'N/A')],
   ]
 
-  ;(doc as any).autoTable({
+  autoTable(doc, {
     startY: y,
     head: [['Parameter', 'Value']],
     body: inputRows,
