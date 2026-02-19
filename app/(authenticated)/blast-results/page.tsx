@@ -142,6 +142,552 @@ interface ResultData {
 }
 
 // ============================================
+// STANDALONE EXPORT FUNCTIONS
+// ============================================
+
+async function generateExcelBlob(
+  job: BlastAlignerJob,
+  result: ResultData,
+  assayName: string
+): Promise<Blob> {
+  const ExcelJS = (await import('exceljs')).default
+  const workbook = new ExcelJS.Workbook()
+  const ws = workbook.addWorksheet('Results')
+
+  const oligoOrder = result.oligo_order || { forward_primers: [], probes: [], reverse_primers: [] }
+  const allOligoIds = [
+    ...(oligoOrder.forward_primers || []),
+    ...(oligoOrder.probes || []),
+    ...(oligoOrder.reverse_primers || []),
+  ]
+  const oligoSequences = result.oligo_sequences || {}
+  const settings = result.settings_used || {}
+  const patterns = result.patterns || []
+  const perOligoStats = result.per_oligo_stats || []
+  const summary = result.summary
+  const mmDist = result.mismatch_distribution || {}
+  const overall = result.overall_pattern
+
+  const nFwd = (oligoOrder.forward_primers || []).length
+  const nProbe = (oligoOrder.probes || []).length
+  const nRev = (oligoOrder.reverse_primers || []).length
+
+  const fwdStats = perOligoStats.filter((s) => s.category === 'forward_primer')
+  const probeStats = perOligoStats.filter((s) => s.category === 'probe')
+  const revStats = perOligoStats.filter((s) => s.category === 'reverse_primer')
+
+  const boldFont = { bold: true }
+  const titleFont = { bold: true, size: 14 }
+  const categoryFont = { bold: true, size: 11 }
+  const monoFont = { name: 'Courier New', size: 10 }
+
+  let row = 1
+
+  // Title
+  ws.getCell(row, 1).value = 'qPCR Oligo Inclusivity Analysis Results'
+  ws.getCell(row, 1).font = titleFont
+  row += 2
+
+  // Settings
+  const settingsParts = [
+    `min_fwd=${settings.min_fwd_matched ?? 'N/A'}`,
+    `min_rev=${settings.min_rev_matched ?? 'N/A'}`,
+    `min_probes=${settings.min_probe_matched ?? 'N/A'}`,
+    `min_coverage=${settings.min_coverage ?? 'N/A'}`,
+    `max_mm/oligo=${settings.max_mismatches_per_oligo ?? 'N/A'}`,
+  ]
+  ws.getCell(row, 1).value = `Settings: ${settingsParts.join(', ')}`
+  ws.getCell(row, 1).font = boldFont
+  row++
+
+  // Amplicon size constraints
+  if (settings.min_amplicon_size != null || settings.max_amplicon_size != null) {
+    const parts = []
+    if (settings.min_amplicon_size != null) parts.push(`min=${settings.min_amplicon_size}`)
+    if (settings.max_amplicon_size != null) parts.push(`max=${settings.max_amplicon_size}`)
+    ws.getCell(row, 1).value = `Amplicon size constraints: ${parts.join(', ')}`
+    ws.getCell(row, 1).font = boldFont
+    row++
+  }
+  row++
+
+  // Category labels row
+  let col = 2
+  if (nFwd > 0) {
+    ws.getCell(row, col).value = '--- Forward Primers ---'
+    ws.getCell(row, col).font = categoryFont
+    col += nFwd
+  }
+  if (nProbe > 0) {
+    ws.getCell(row, col).value = '--- Probes ---'
+    ws.getCell(row, col).font = categoryFont
+    col += nProbe
+  }
+  if (nRev > 0) {
+    ws.getCell(row, col).value = '--- Reverse Primers ---'
+    ws.getCell(row, col).font = categoryFont
+  }
+  row++
+
+  // Column headers
+  const totalOligos = allOligoIds.length
+  const headers = ['Pattern #', ...allOligoIds, 'Count', 'Percentage', 'Total Mismatches', 'Fwd Matched', 'Rev Matched', 'Probes Matched', 'Amplicon Length', 'Example Sequences']
+  headers.forEach((h, i) => {
+    ws.getCell(row, i + 1).value = h
+    ws.getCell(row, i + 1).font = boldFont
+  })
+  row++
+
+  // Oligo sequences row
+  ws.getCell(row, 1).value = ''
+  allOligoIds.forEach((id, i) => {
+    ws.getCell(row, i + 2).value = oligoSequences[id] || ''
+    ws.getCell(row, i + 2).font = monoFont
+  })
+  row++
+
+  // Pattern data rows
+  for (const pat of patterns) {
+    ws.getCell(row, 1).value = pat.pattern_number
+    pat.per_oligo_signatures.forEach((sigObj, i) => {
+      if (i < totalOligos) {
+        ws.getCell(row, i + 2).value = sigObj.signature
+        ws.getCell(row, i + 2).font = monoFont
+      }
+    })
+    const dataCol = totalOligos + 2
+    ws.getCell(row, dataCol).value = pat.count
+    ws.getCell(row, dataCol + 1).value = `${pat.percentage.toFixed(1)}%`
+    ws.getCell(row, dataCol + 2).value = pat.total_mismatches
+    ws.getCell(row, dataCol + 3).value = pat.fwd_matched
+    ws.getCell(row, dataCol + 4).value = pat.rev_matched
+    ws.getCell(row, dataCol + 5).value = pat.probe_matched
+    ws.getCell(row, dataCol + 6).value = pat.amplicon_length ?? ''
+    const exArr = pat.example_sequences || []
+    let exStr = exArr.slice(0, 3).join(', ')
+    if (exArr.length > 3) exStr += `, +${exArr.length - 3} more`
+    ws.getCell(row, dataCol + 7).value = exStr
+    row++
+  }
+  row++
+
+  // Per-Oligo Statistics
+  ws.getCell(row, 1).value = 'PER-OLIGO STATISTICS:'
+  ws.getCell(row, 1).font = boldFont
+  row++
+
+  const writeOligoStatCategory = (label: string, stats: PerOligoStat[]) => {
+    if (stats.length === 0) return
+    ws.getCell(row, 1).value = label
+    ws.getCell(row, 1).font = categoryFont
+    row++
+    for (const s of stats) {
+      ws.getCell(row, 1).value = `  ${s.id}: ${s.total_matches}/${s.total_sequences} matches (${s.percentage.toFixed(1)}%) - Sense: ${s.sense_matches}, Antisense: ${s.antisense_matches}`
+      row++
+    }
+  }
+
+  writeOligoStatCategory('Forward Primers:', fwdStats)
+  writeOligoStatCategory('Probes:', probeStats)
+  writeOligoStatCategory('Reverse Primers:', revStats)
+  row++
+
+  // Summary
+  if (summary) {
+    ws.getCell(row, 1).value = 'SUMMARY:'
+    ws.getCell(row, 1).font = boldFont
+    row++
+    ws.getCell(row, 1).value = `Total sequences analyzed: ${summary.total_sequences}`
+    row++
+    const meetPct = summary.total_sequences > 0 ? ((summary.sequences_meeting_thresholds / summary.total_sequences) * 100).toFixed(1) : '0.0'
+    ws.getCell(row, 1).value = `Sequences meeting all thresholds: ${summary.sequences_meeting_thresholds} (${meetPct}%)`
+    row += 2
+
+    ws.getCell(row, 1).value = 'AMPLICON STATISTICS:'
+    ws.getCell(row, 1).font = boldFont
+    row++
+    const ampPct = summary.total_sequences > 0 ? ((summary.sequences_with_valid_amplicon / summary.total_sequences) * 100).toFixed(1) : '0.0'
+    ws.getCell(row, 1).value = `Sequences with valid amplicon: ${summary.sequences_with_valid_amplicon} (${ampPct}%)`
+    row++
+    ws.getCell(row, 1).value = `Sequences without valid amplicon: ${summary.sequences_without_valid_amplicon}`
+    row += 2
+  }
+
+  // Mismatch Distribution
+  ws.getCell(row, 1).value = 'MISMATCH DISTRIBUTION (best oligo per category per sequence):'
+  ws.getCell(row, 1).font = boldFont
+  row++
+
+  const writeMmDist = (label: string, dist: MismatchDist | undefined) => {
+    if (!dist) return
+    ws.getCell(row, 1).value = label
+    ws.getCell(row, 1).font = categoryFont
+    row++
+    ws.getCell(row, 1).value = `  0 mismatches: ${dist.zero_mm} (${dist.zero_mm_pct.toFixed(1)}%)`
+    row++
+    ws.getCell(row, 1).value = `  1 mismatch: ${dist.one_mm} (${dist.one_mm_pct.toFixed(1)}%)`
+    row++
+    ws.getCell(row, 1).value = `  >1 mismatches: ${dist.more_mm} (${dist.more_mm_pct.toFixed(1)}%)`
+    row++
+    ws.getCell(row, 1).value = `  No match: ${dist.no_match} (${dist.no_match_pct.toFixed(1)}%)`
+    row++
+  }
+
+  writeMmDist('Forward Primers:', mmDist.forward_primers)
+  writeMmDist('Probes:', mmDist.probes)
+  writeMmDist('Reverse Primers:', mmDist.reverse_primers)
+  row++
+
+  // Overall Pattern
+  if (overall) {
+    ws.getCell(row, 1).value = 'Overall Pattern (worst best-match across all categories):'
+    ws.getCell(row, 1).font = boldFont
+    row++
+    ws.getCell(row, 1).value = `  All categories 0 mismatches: ${overall.all_perfect} (${overall.all_perfect_pct.toFixed(1)}%)`
+    row++
+    ws.getCell(row, 1).value = `  All categories \u22641 mismatch: ${overall.max_one_mm} (${overall.max_one_mm_pct.toFixed(1)}%)`
+    row++
+    ws.getCell(row, 1).value = `  \u22652 mismatches in any category: ${overall.two_plus_mm} (${overall.two_plus_mm_pct.toFixed(1)}%)`
+    row++
+    ws.getCell(row, 1).value = `  No match in any category: ${overall.no_match} (${overall.no_match_pct.toFixed(1)}%)`
+    row++
+  }
+
+  // Auto-width columns
+  ws.columns.forEach((column) => {
+    let maxLen = 10
+    column.eachCell?.({ includeEmpty: false }, (cell) => {
+      const len = cell.value ? cell.value.toString().length : 0
+      if (len > maxLen) maxLen = len
+    })
+    column.width = Math.min(maxLen + 2, 60)
+  })
+
+  const buffer = await workbook.xlsx.writeBuffer()
+  return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+}
+
+async function generatePdfBlob(
+  job: BlastAlignerJob,
+  result: ResultData,
+  assayName: string
+): Promise<Blob> {
+  const { default: jsPDF } = await import('jspdf')
+  await import('jspdf-autotable')
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const pageHeight = doc.internal.pageSize.getHeight()
+  const margin = 40
+  let y = margin
+
+  const oligoOrder = result.oligo_order || { forward_primers: [], probes: [], reverse_primers: [] }
+  const allOligoIds = [
+    ...(oligoOrder.forward_primers || []),
+    ...(oligoOrder.probes || []),
+    ...(oligoOrder.reverse_primers || []),
+  ]
+  const oligoSequences = result.oligo_sequences || {}
+  const settings = result.settings_used || {}
+  const patterns = result.patterns || []
+  const perOligoStats = result.per_oligo_stats || []
+  const summary = result.summary
+  const blastStats = result.blast_statistics
+  const mmDist = result.mismatch_distribution || {}
+  const overall = result.overall_pattern
+
+  const fwdStats = perOligoStats.filter((s) => s.category === 'forward_primer')
+  const probeStats = perOligoStats.filter((s) => s.category === 'probe')
+  const revStats = perOligoStats.filter((s) => s.category === 'reverse_primer')
+
+  // Helper: add section heading with page break check
+  const addHeading = (text: string) => {
+    if (y > pageHeight - 80) {
+      doc.addPage()
+      y = margin
+    }
+    doc.setFontSize(12)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(31, 41, 55)
+    doc.text(text, margin, y)
+    y += 18
+  }
+
+  // Helper: update y after autoTable
+  const updateY = () => {
+    y = (doc as any).lastAutoTable.finalY + 15
+  }
+
+  // ---- Title ----
+  doc.setFontSize(16)
+  doc.setFont('helvetica', 'bold')
+  doc.setTextColor(17, 24, 39)
+  doc.text('qPCR Oligo Inclusivity Analysis Results', margin, y)
+  y += 20
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  doc.setTextColor(75, 85, 99)
+  doc.text(`${assayName}  |  Job ID: ${job.align_id}  |  Date Range: ${job.alignjob_date_from} - ${job.alignjob_date_to}`, margin, y)
+  y += 14
+  doc.setFontSize(8)
+  doc.text(`Generated: ${new Date().toLocaleString()}`, margin, y)
+  y += 20
+
+  // ---- Settings Used ----
+  if (settings && Object.keys(settings).length > 0) {
+    addHeading('Settings Used')
+    const settingsRows: any[][] = []
+    if (settings.min_fwd_matched != null) settingsRows.push(['Min Fwd Matched', String(settings.min_fwd_matched)])
+    if (settings.min_rev_matched != null) settingsRows.push(['Min Rev Matched', String(settings.min_rev_matched)])
+    if (settings.min_probe_matched != null) settingsRows.push(['Min Probes Matched', String(settings.min_probe_matched)])
+    if (settings.min_coverage != null) settingsRows.push(['Min Coverage', String(settings.min_coverage)])
+    if (settings.max_mismatches_per_oligo != null) settingsRows.push(['Max MM/Oligo', String(settings.max_mismatches_per_oligo)])
+    if (settings.match_score != null) settingsRows.push(['Match Score', String(settings.match_score)])
+    if (settings.mismatch_score != null) settingsRows.push(['Mismatch Score', String(settings.mismatch_score)])
+    if (settings.gap_open_score != null) settingsRows.push(['Gap Open Score', String(settings.gap_open_score)])
+    if (settings.gap_extend_score != null) settingsRows.push(['Gap Extend Score', String(settings.gap_extend_score)])
+    if (settings.min_amplicon_size != null) settingsRows.push(['Min Amplicon Size', String(settings.min_amplicon_size)])
+    if (settings.max_amplicon_size != null) settingsRows.push(['Max Amplicon Size', String(settings.max_amplicon_size)])
+
+    if (settingsRows.length > 0) {
+      ;(doc as any).autoTable({
+        startY: y,
+        head: [['Setting', 'Value']],
+        body: settingsRows,
+        theme: 'grid',
+        styles: { fontSize: 8, cellPadding: 4 },
+        headStyles: { fillColor: [59, 130, 246], textColor: 255 },
+        margin: { left: margin, right: margin },
+        tableWidth: 300,
+      })
+      updateY()
+    }
+  }
+
+  // ---- Summary ----
+  addHeading('Summary')
+  const summaryRows: any[][] = []
+  if (blastStats) {
+    summaryRows.push(['Total BLAST Hits', String(blastStats.total_blast_hits)])
+    summaryRows.push(['Filtered BLAST Hits', String(blastStats.filtered_blast_hits)])
+  }
+  if (summary) {
+    summaryRows.push(['Total Sequences', String(summary.total_sequences)])
+    const meetPct = summary.total_sequences > 0 ? ((summary.sequences_meeting_thresholds / summary.total_sequences) * 100).toFixed(1) : '0.0'
+    summaryRows.push(['Meeting Thresholds', `${summary.sequences_meeting_thresholds} (${meetPct}%)`])
+    const ampPct = summary.total_sequences > 0 ? ((summary.sequences_with_valid_amplicon / summary.total_sequences) * 100).toFixed(1) : '0.0'
+    summaryRows.push(['Valid Amplicon', `${summary.sequences_with_valid_amplicon} (${ampPct}%)`])
+    summaryRows.push(['No Valid Amplicon', String(summary.sequences_without_valid_amplicon)])
+  }
+  if (summaryRows.length > 0) {
+    ;(doc as any).autoTable({
+      startY: y,
+      head: [['Metric', 'Value']],
+      body: summaryRows,
+      theme: 'grid',
+      styles: { fontSize: 8, cellPadding: 4 },
+      headStyles: { fillColor: [59, 130, 246], textColor: 255 },
+      margin: { left: margin, right: margin },
+      tableWidth: 350,
+    })
+    updateY()
+  }
+
+  // ---- Alignment Patterns ----
+  if (patterns.length > 0) {
+    addHeading(`Alignment Patterns (${patterns.length})`)
+
+    const patternHead = ['#', ...allOligoIds, 'Count', '%', 'Total MM', 'Fwd', 'Rev', 'Probes', 'Amp Len', 'Examples']
+
+    // Oligo sequences row
+    const seqRow = ['seq', ...allOligoIds.map(id => oligoSequences[id] || ''), '', '', '', '', '', '', '', '']
+
+    // Pattern data rows
+    const patternBody = [seqRow, ...patterns.map(pat => {
+      const sigs = allOligoIds.map((_, idx) => pat.per_oligo_signatures[idx]?.signature || '')
+      const exArr = pat.example_sequences || []
+      let exStr = exArr.slice(0, 3).join(', ')
+      if (exArr.length > 3) exStr += `, +${exArr.length - 3} more`
+      return [
+        pat.pattern_number, ...sigs, pat.count, `${pat.percentage.toFixed(1)}%`,
+        pat.total_mismatches, pat.fwd_matched, pat.rev_matched, pat.probe_matched,
+        pat.amplicon_length ?? '', exStr
+      ]
+    })]
+
+    ;(doc as any).autoTable({
+      startY: y,
+      head: [patternHead],
+      body: patternBody,
+      theme: 'grid',
+      styles: { fontSize: 7, cellPadding: 2, font: 'courier', overflow: 'linebreak' },
+      headStyles: { fillColor: [75, 85, 99], fontSize: 7, font: 'helvetica', textColor: 255 },
+      margin: { left: margin, right: margin },
+      didParseCell: (data: any) => {
+        // First body row (oligo sequences) -> gray italic
+        if (data.section === 'body' && data.row.index === 0) {
+          data.cell.styles.textColor = [156, 163, 175]
+          data.cell.styles.fontStyle = 'italic'
+        }
+        // NO_MATCH cells -> red bold
+        if (data.section === 'body' && data.cell.raw === 'NO_MATCH') {
+          data.cell.styles.textColor = [220, 38, 38]
+          data.cell.styles.fontStyle = 'bold'
+        }
+      }
+    })
+    updateY()
+  }
+
+  // ---- Per-Oligo Statistics ----
+  const oligoStatGroups = [
+    { label: 'Forward Primers', stats: fwdStats },
+    { label: 'Probes', stats: probeStats },
+    { label: 'Reverse Primers', stats: revStats },
+  ].filter(g => g.stats.length > 0)
+
+  if (oligoStatGroups.length > 0) {
+    addHeading('Per-Oligo Statistics')
+
+    for (const group of oligoStatGroups) {
+      if (y > pageHeight - 80) {
+        doc.addPage()
+        y = margin
+      }
+      doc.setFontSize(9)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(75, 85, 99)
+      doc.text(group.label, margin, y)
+      y += 12
+
+      const statsBody = group.stats.map(s => [
+        s.id,
+        `${s.total_matches}/${s.total_sequences}`,
+        `${s.percentage.toFixed(1)}%`,
+        String(s.sense_matches),
+        String(s.antisense_matches),
+      ])
+
+      ;(doc as any).autoTable({
+        startY: y,
+        head: [['Oligo', 'Matches', 'Match Rate', 'Sense', 'Antisense']],
+        body: statsBody,
+        theme: 'grid',
+        styles: { fontSize: 8, cellPadding: 3 },
+        headStyles: { fillColor: [107, 114, 128], textColor: 255 },
+        margin: { left: margin, right: margin },
+        tableWidth: 400,
+      })
+      updateY()
+    }
+  }
+
+  // ---- Mismatch Distribution ----
+  const mmDistGroups = [
+    { label: 'Forward Primers', dist: mmDist.forward_primers },
+    { label: 'Probes', dist: mmDist.probes },
+    { label: 'Reverse Primers', dist: mmDist.reverse_primers },
+  ].filter(g => g.dist)
+
+  if (mmDistGroups.length > 0) {
+    addHeading('Mismatch Distribution')
+    doc.setFontSize(7)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(107, 114, 128)
+    doc.text('Best oligo per category per sequence', margin, y)
+    y += 12
+
+    for (const group of mmDistGroups) {
+      if (y > pageHeight - 80) {
+        doc.addPage()
+        y = margin
+      }
+      doc.setFontSize(9)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(75, 85, 99)
+      doc.text(group.label, margin, y)
+      y += 12
+
+      const d = group.dist!
+      const distBody = [
+        ['0 mismatches', `${d.zero_mm} (${d.zero_mm_pct.toFixed(1)}%)`],
+        ['1 mismatch', `${d.one_mm} (${d.one_mm_pct.toFixed(1)}%)`],
+        ['>1 mismatches', `${d.more_mm} (${d.more_mm_pct.toFixed(1)}%)`],
+        ['No match', `${d.no_match} (${d.no_match_pct.toFixed(1)}%)`],
+      ]
+
+      ;(doc as any).autoTable({
+        startY: y,
+        head: [['Category', 'Count (%)']],
+        body: distBody,
+        theme: 'grid',
+        styles: { fontSize: 8, cellPadding: 3 },
+        headStyles: { fillColor: [107, 114, 128], textColor: 255 },
+        margin: { left: margin, right: margin },
+        tableWidth: 280,
+      })
+      updateY()
+    }
+  }
+
+  // ---- Overall Pattern ----
+  if (overall) {
+    addHeading('Overall Pattern')
+    doc.setFontSize(7)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(107, 114, 128)
+    doc.text('Worst best-match across all active categories per sequence', margin, y)
+    y += 12
+
+    const overallBody = [
+      ['All 0 mismatches', `${overall.all_perfect} (${overall.all_perfect_pct.toFixed(1)}%)`],
+      ['All \u22641 mismatch', `${overall.max_one_mm} (${overall.max_one_mm_pct.toFixed(1)}%)`],
+      ['\u22652 mismatches', `${overall.two_plus_mm} (${overall.two_plus_mm_pct.toFixed(1)}%)`],
+      ['No match', `${overall.no_match} (${overall.no_match_pct.toFixed(1)}%)`],
+    ]
+
+    ;(doc as any).autoTable({
+      startY: y,
+      head: [['Category', 'Count (%)']],
+      body: overallBody,
+      theme: 'grid',
+      styles: { fontSize: 8, cellPadding: 3 },
+      headStyles: { fillColor: [107, 114, 128], textColor: 255 },
+      margin: { left: margin, right: margin },
+      tableWidth: 280,
+    })
+    updateY()
+  }
+
+  // ---- Input Parameters ----
+  addHeading('Input Parameters')
+  const inputRows: any[][] = [
+    ['Date Range', `${job.alignjob_date_from} to ${job.alignjob_date_to}`],
+    ['TaxID', String(job.alignjob_taxid)],
+    ['Identity', `${job.alignjob_identity ?? 'N/A'}%`],
+    ['Coverage', `${job.alignjob_coverage ?? 'N/A'}%`],
+    ['Match Score', String(job.alignjob_match_score ?? 'N/A')],
+    ['Mismatch Score', String(job.alignjob_mismatch_score ?? 'N/A')],
+    ['Open Gap', String(job.alignjob_opengap ?? 'N/A')],
+    ['Extend Gap', String(job.alignjob_extendgap ?? 'N/A')],
+    ['Oligo Min Cover', String(job.alignjob_oligo_min_cover ?? 'N/A')],
+  ]
+
+  ;(doc as any).autoTable({
+    startY: y,
+    head: [['Parameter', 'Value']],
+    body: inputRows,
+    theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 4 },
+    headStyles: { fillColor: [59, 130, 246], textColor: 255 },
+    margin: { left: margin, right: margin },
+    tableWidth: 300,
+  })
+
+  return doc.output('blob') as unknown as Blob
+}
+
+// ============================================
 // MAIN PAGE COMPONENT
 // ============================================
 
@@ -156,6 +702,9 @@ export default function BlastResultsPage() {
     job: BlastAlignerJob
     result: ResultData
   } | null>(null)
+  const [batchExportFormat, setBatchExportFormat] = useState<'excel' | 'pdf'>('excel')
+  const [batchExporting, setBatchExporting] = useState(false)
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null)
 
   const fetchAssays = async () => {
     try {
@@ -279,6 +828,109 @@ export default function BlastResultsPage() {
     }
   }
 
+  const handleBatchExport = async () => {
+    if (selectedJobs.size === 0) {
+      setError('Please select at least one job to export')
+      return
+    }
+
+    const completedJobs = jobs.filter(
+      (j) => selectedJobs.has(j.align_id) && j.alignjob_status === 'done' && j.alignjob_result
+    )
+
+    if (completedJobs.length === 0) {
+      setError('No completed jobs with results found in selection')
+      return
+    }
+
+    setBatchExporting(true)
+    setBatchProgress({ current: 0, total: completedJobs.length })
+    setError(null)
+
+    try {
+      const supportsDirectoryPicker = 'showDirectoryPicker' in window
+
+      if (supportsDirectoryPicker) {
+        const dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' })
+
+        for (let i = 0; i < completedJobs.length; i++) {
+          const j = completedJobs[i]
+          const resultData = j.alignjob_result as ResultData
+          if (!resultData.success) {
+            setBatchProgress({ current: i + 1, total: completedJobs.length })
+            continue
+          }
+          const name = getAssayName(j.alignjob_assay_id)
+          const safeName = name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '')
+
+          let blob: Blob
+          let ext: string
+          if (batchExportFormat === 'pdf') {
+            blob = await generatePdfBlob(j, resultData, name)
+            ext = 'pdf'
+          } else {
+            blob = await generateExcelBlob(j, resultData, name)
+            ext = 'xlsx'
+          }
+
+          const filename = `blast_result_${j.align_id}_${safeName}.${ext}`
+          const fileHandle = await dirHandle.getFileHandle(filename, { create: true })
+          const writable = await fileHandle.createWritable()
+          await writable.write(blob)
+          await writable.close()
+
+          setBatchProgress({ current: i + 1, total: completedJobs.length })
+        }
+      } else {
+        // Fallback: sequential individual downloads
+        for (let i = 0; i < completedJobs.length; i++) {
+          const j = completedJobs[i]
+          const resultData = j.alignjob_result as ResultData
+          if (!resultData.success) {
+            setBatchProgress({ current: i + 1, total: completedJobs.length })
+            continue
+          }
+          const name = getAssayName(j.alignjob_assay_id)
+          const safeName = name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '')
+
+          let blob: Blob
+          let ext: string
+          if (batchExportFormat === 'pdf') {
+            blob = await generatePdfBlob(j, resultData, name)
+            ext = 'pdf'
+          } else {
+            blob = await generateExcelBlob(j, resultData, name)
+            ext = 'xlsx'
+          }
+
+          const filename = `blast_result_${j.align_id}_${safeName}.${ext}`
+          const link = document.createElement('a')
+          link.href = URL.createObjectURL(blob)
+          link.download = filename
+          link.style.visibility = 'hidden'
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+          URL.revokeObjectURL(link.href)
+
+          setBatchProgress({ current: i + 1, total: completedJobs.length })
+
+          if (i < completedJobs.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 500))
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        setError(err.message || 'Batch export failed')
+        console.error('Batch export error:', err)
+      }
+    } finally {
+      setBatchExporting(false)
+      setBatchProgress(null)
+    }
+  }
+
   const handleViewResult = (job: BlastAlignerJob) => {
     if (job.alignjob_status === 'done' && job.alignjob_result) {
       try {
@@ -349,6 +1001,26 @@ export default function BlastResultsPage() {
           >
             {deleteLoading ? 'Deleting...' : `Delete (${selectedJobs.size})`}
           </button>
+
+          <div className="flex items-center gap-2 ml-4 pl-4 border-l border-gray-300 dark:border-gray-600">
+            <select
+              value={batchExportFormat}
+              onChange={(e) => setBatchExportFormat(e.target.value as 'excel' | 'pdf')}
+              className="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-300 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="excel">Excel</option>
+              <option value="pdf">PDF</option>
+            </select>
+            <button
+              onClick={handleBatchExport}
+              disabled={batchExporting || selectedJobs.size === 0}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg shadow-sm transition-colors text-sm"
+            >
+              {batchExporting
+                ? `Exporting ${batchProgress?.current ?? 0}/${batchProgress?.total ?? 0}...`
+                : `Batch Export (${selectedJobs.size})`}
+            </button>
+          </div>
         </div>
         <button
           onClick={fetchJobs}
@@ -481,208 +1153,24 @@ function ResultViewer({ job, result, assayName, onClose }: ResultViewerProps) {
   const probeStats = perOligoStats.filter((s) => s.category === 'probe')
   const revStats = perOligoStats.filter((s) => s.category === 'reverse_primer')
 
-  // Excel export using ExcelJS
+  // Excel export using standalone function
   const handleExportExcel = async () => {
-    const ExcelJS = (await import('exceljs')).default
-    const workbook = new ExcelJS.Workbook()
-    const ws = workbook.addWorksheet('Results')
-
-    const boldFont = { bold: true }
-    const titleFont = { bold: true, size: 14 }
-    const categoryFont = { bold: true, size: 11 }
-    const monoFont = { name: 'Courier New', size: 10 }
-
-    let row = 1
-
-    // Title
-    ws.getCell(row, 1).value = 'qPCR Oligo Inclusivity Analysis Results'
-    ws.getCell(row, 1).font = titleFont
-    row += 2
-
-    // Settings
-    const settingsParts = [
-      `min_fwd=${settings.min_fwd_matched ?? 'N/A'}`,
-      `min_rev=${settings.min_rev_matched ?? 'N/A'}`,
-      `min_probes=${settings.min_probe_matched ?? 'N/A'}`,
-      `min_coverage=${settings.min_coverage ?? 'N/A'}`,
-      `max_mm/oligo=${settings.max_mismatches_per_oligo ?? 'N/A'}`,
-    ]
-    ws.getCell(row, 1).value = `Settings: ${settingsParts.join(', ')}`
-    ws.getCell(row, 1).font = boldFont
-    row++
-
-    // Amplicon size constraints
-    if (settings.min_amplicon_size != null || settings.max_amplicon_size != null) {
-      const parts = []
-      if (settings.min_amplicon_size != null) parts.push(`min=${settings.min_amplicon_size}`)
-      if (settings.max_amplicon_size != null) parts.push(`max=${settings.max_amplicon_size}`)
-      ws.getCell(row, 1).value = `Amplicon size constraints: ${parts.join(', ')}`
-      ws.getCell(row, 1).font = boldFont
-      row++
-    }
-    row++
-
-    // Category labels row
-    let col = 2 // col 1 is Pattern #
-    if (nFwd > 0) {
-      ws.getCell(row, col).value = '--- Forward Primers ---'
-      ws.getCell(row, col).font = categoryFont
-      col += nFwd
-    }
-    if (nProbe > 0) {
-      ws.getCell(row, col).value = '--- Probes ---'
-      ws.getCell(row, col).font = categoryFont
-      col += nProbe
-    }
-    if (nRev > 0) {
-      ws.getCell(row, col).value = '--- Reverse Primers ---'
-      ws.getCell(row, col).font = categoryFont
-    }
-    row++
-
-    // Column headers
-    const totalOligos = allOligoIds.length
-    const headers = ['Pattern #', ...allOligoIds, 'Count', 'Percentage', 'Total Mismatches', 'Fwd Matched', 'Rev Matched', 'Probes Matched', 'Amplicon Length', 'Example Sequences']
-    headers.forEach((h, i) => {
-      ws.getCell(row, i + 1).value = h
-      ws.getCell(row, i + 1).font = boldFont
-    })
-    row++
-
-    // Oligo sequences row
-    ws.getCell(row, 1).value = ''
-    allOligoIds.forEach((id, i) => {
-      ws.getCell(row, i + 2).value = oligoSequences[id] || ''
-      ws.getCell(row, i + 2).font = monoFont
-    })
-    row++
-
-    // Pattern data rows
-    for (const pat of patterns) {
-      ws.getCell(row, 1).value = pat.pattern_number
-      // Per-oligo signatures
-      pat.per_oligo_signatures.forEach((sigObj, i) => {
-        if (i < totalOligos) {
-          ws.getCell(row, i + 2).value = sigObj.signature
-          ws.getCell(row, i + 2).font = monoFont
-        }
-      })
-      const dataCol = totalOligos + 2
-      ws.getCell(row, dataCol).value = pat.count
-      ws.getCell(row, dataCol + 1).value = `${pat.percentage.toFixed(1)}%`
-      ws.getCell(row, dataCol + 2).value = pat.total_mismatches
-      ws.getCell(row, dataCol + 3).value = pat.fwd_matched
-      ws.getCell(row, dataCol + 4).value = pat.rev_matched
-      ws.getCell(row, dataCol + 5).value = pat.probe_matched
-      ws.getCell(row, dataCol + 6).value = pat.amplicon_length ?? ''
-      // Examples: first 3 + "+N more"
-      const exArr = pat.example_sequences || []
-      let exStr = exArr.slice(0, 3).join(', ')
-      if (exArr.length > 3) exStr += `, +${exArr.length - 3} more`
-      ws.getCell(row, dataCol + 7).value = exStr
-      row++
-    }
-    row++
-
-    // Per-Oligo Statistics
-    ws.getCell(row, 1).value = 'PER-OLIGO STATISTICS:'
-    ws.getCell(row, 1).font = boldFont
-    row++
-
-    const writeOligoStatCategory = (label: string, stats: PerOligoStat[]) => {
-      if (stats.length === 0) return
-      ws.getCell(row, 1).value = label
-      ws.getCell(row, 1).font = categoryFont
-      row++
-      for (const s of stats) {
-        ws.getCell(row, 1).value = `  ${s.id}: ${s.total_matches}/${s.total_sequences} matches (${s.percentage.toFixed(1)}%) - Sense: ${s.sense_matches}, Antisense: ${s.antisense_matches}`
-        row++
-      }
-    }
-
-    writeOligoStatCategory('Forward Primers:', fwdStats)
-    writeOligoStatCategory('Probes:', probeStats)
-    writeOligoStatCategory('Reverse Primers:', revStats)
-    row++
-
-    // Summary
-    if (summary) {
-      ws.getCell(row, 1).value = 'SUMMARY:'
-      ws.getCell(row, 1).font = boldFont
-      row++
-      ws.getCell(row, 1).value = `Total sequences analyzed: ${summary.total_sequences}`
-      row++
-      const meetPct = summary.total_sequences > 0 ? ((summary.sequences_meeting_thresholds / summary.total_sequences) * 100).toFixed(1) : '0.0'
-      ws.getCell(row, 1).value = `Sequences meeting all thresholds: ${summary.sequences_meeting_thresholds} (${meetPct}%)`
-      row += 2
-
-      // Amplicon Statistics
-      ws.getCell(row, 1).value = 'AMPLICON STATISTICS:'
-      ws.getCell(row, 1).font = boldFont
-      row++
-      const ampPct = summary.total_sequences > 0 ? ((summary.sequences_with_valid_amplicon / summary.total_sequences) * 100).toFixed(1) : '0.0'
-      ws.getCell(row, 1).value = `Sequences with valid amplicon: ${summary.sequences_with_valid_amplicon} (${ampPct}%)`
-      row++
-      ws.getCell(row, 1).value = `Sequences without valid amplicon: ${summary.sequences_without_valid_amplicon}`
-      row += 2
-    }
-
-    // Mismatch Distribution
-    ws.getCell(row, 1).value = 'MISMATCH DISTRIBUTION (best oligo per category per sequence):'
-    ws.getCell(row, 1).font = boldFont
-    row++
-
-    const writeMmDist = (label: string, dist: MismatchDist | undefined) => {
-      if (!dist) return
-      ws.getCell(row, 1).value = label
-      ws.getCell(row, 1).font = categoryFont
-      row++
-      ws.getCell(row, 1).value = `  0 mismatches: ${dist.zero_mm} (${dist.zero_mm_pct.toFixed(1)}%)`
-      row++
-      ws.getCell(row, 1).value = `  1 mismatch: ${dist.one_mm} (${dist.one_mm_pct.toFixed(1)}%)`
-      row++
-      ws.getCell(row, 1).value = `  >1 mismatches: ${dist.more_mm} (${dist.more_mm_pct.toFixed(1)}%)`
-      row++
-      ws.getCell(row, 1).value = `  No match: ${dist.no_match} (${dist.no_match_pct.toFixed(1)}%)`
-      row++
-    }
-
-    writeMmDist('Forward Primers:', mmDist.forward_primers)
-    writeMmDist('Probes:', mmDist.probes)
-    writeMmDist('Reverse Primers:', mmDist.reverse_primers)
-    row++
-
-    // Overall Pattern
-    if (overall) {
-      ws.getCell(row, 1).value = 'Overall Pattern (worst best-match across all categories):'
-      ws.getCell(row, 1).font = boldFont
-      row++
-      ws.getCell(row, 1).value = `  All categories 0 mismatches: ${overall.all_perfect} (${overall.all_perfect_pct.toFixed(1)}%)`
-      row++
-      ws.getCell(row, 1).value = `  All categories \u22641 mismatch: ${overall.max_one_mm} (${overall.max_one_mm_pct.toFixed(1)}%)`
-      row++
-      ws.getCell(row, 1).value = `  \u22652 mismatches in any category: ${overall.two_plus_mm} (${overall.two_plus_mm_pct.toFixed(1)}%)`
-      row++
-      ws.getCell(row, 1).value = `  No match in any category: ${overall.no_match} (${overall.no_match_pct.toFixed(1)}%)`
-      row++
-    }
-
-    // Auto-width columns
-    ws.columns.forEach((column) => {
-      let maxLen = 10
-      column.eachCell?.({ includeEmpty: false }, (cell) => {
-        const len = cell.value ? cell.value.toString().length : 0
-        if (len > maxLen) maxLen = len
-      })
-      column.width = Math.min(maxLen + 2, 60)
-    })
-
-    // Generate and download
-    const buffer = await workbook.xlsx.writeBuffer()
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const blob = await generateExcelBlob(job, result, assayName)
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
     link.download = `blast_result_${job.align_id}_${assayName.replace(/\s+/g, '_')}.xlsx`
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  // PDF export using standalone function
+  const handleExportPdf = async () => {
+    const blob = await generatePdfBlob(job, result, assayName)
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `blast_result_${job.align_id}_${assayName.replace(/\s+/g, '_')}.pdf`
     link.style.visibility = 'hidden'
     document.body.appendChild(link)
     link.click()
@@ -754,6 +1242,12 @@ function ResultViewer({ job, result, assayName, onClose }: ResultViewerProps) {
               className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg shadow-sm transition-colors text-sm"
             >
               Export Excel
+            </button>
+            <button
+              onClick={handleExportPdf}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-sm transition-colors text-sm"
+            >
+              Export PDF
             </button>
             <button
               onClick={onClose}

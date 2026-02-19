@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "mcp__ide__getDiagnostics",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(npx next build)",
+      "Bash(wc:*)"
     ]
   }
 }
